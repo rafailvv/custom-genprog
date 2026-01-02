@@ -1,0 +1,395 @@
+package edu.passau.apr.evaluator;
+
+import edu.passau.apr.model.FitnessResult;
+import edu.passau.apr.model.Patch;
+
+import javax.tools.JavaCompiler;
+import javax.tools.StandardJavaFileManager;
+import javax.tools.StandardLocation;
+import javax.tools.ToolProvider;
+import java.io.File;
+import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
+
+/**
+ * Evaluates fitness of a patch by compiling the modified code
+ * and running tests against it.
+ */
+public class FitnessEvaluator {
+    private final String buggySourcePath;
+    private final String testSourcePath;
+    private final List<String> testClassNames;
+    private final double positiveTestWeight;
+    private final double negativeTestWeight;
+    private final Path tempDir;
+    private final String mainClassName;
+    private final Path testClassesDir; // Pre-compiled test classes
+
+    public FitnessEvaluator(String buggySourcePath, String testSourcePath, 
+                           List<String> testClassNames,
+                           double positiveTestWeight, double negativeTestWeight,
+                           String mainClassName) throws IOException {
+        this.buggySourcePath = buggySourcePath;
+        this.testSourcePath = testSourcePath;
+        this.testClassNames = new ArrayList<>(testClassNames);
+        this.positiveTestWeight = positiveTestWeight;
+        this.negativeTestWeight = negativeTestWeight;
+        this.mainClassName = mainClassName;
+        this.tempDir = Files.createTempDirectory("apr-eval-");
+        this.testClassesDir = tempDir.resolve("test-classes");
+        Files.createDirectories(testClassesDir);
+        
+        precompileTests();
+    }
+    
+    private void precompileTests() {
+        try {
+            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+            if (compiler == null) return;
+            
+            StandardJavaFileManager fileManager = compiler.getStandardFileManager(null, null, null);
+            fileManager.setLocation(StandardLocation.CLASS_OUTPUT, 
+                                   java.util.Arrays.asList(testClassesDir.toFile()));
+            
+            List<File> allFiles = new ArrayList<>();
+            allFiles.add(new File(buggySourcePath));
+            Path testPath = Paths.get(testSourcePath);
+            if (Files.isDirectory(testPath)) {
+                try (java.util.stream.Stream<Path> stream = Files.walk(testPath)) {
+                    stream.filter(Files::isRegularFile)
+                          .filter(p -> p.toString().endsWith(".java"))
+                          .forEach(p -> allFiles.add(p.toFile()));
+                }
+            } else if (Files.isRegularFile(testPath)) {
+                allFiles.add(testPath.toFile());
+            }
+            
+            if (!allFiles.isEmpty()) {
+                String systemClasspath = System.getProperty("java.class.path");
+                List<String> options = new ArrayList<>();
+                if (systemClasspath != null && !systemClasspath.isEmpty()) {
+                    options.add("-cp");
+                    options.add(systemClasspath);
+                }
+                
+                JavaCompiler.CompilationTask task = compiler.getTask(
+                    null, fileManager, null, options, null,
+                    fileManager.getJavaFileObjectsFromFiles(allFiles)
+                );
+                task.call();
+            }
+            
+            fileManager.close();
+        } catch (Exception e) {
+        }
+    }
+
+    /**
+     * Applies a patch to the source code and evaluates its fitness.
+     */
+    public FitnessResult evaluate(Patch patch, List<String> originalSourceLines) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<FitnessResult> future = executor.submit(() -> {
+            try {
+                List<String> modifiedLines = applyPatch(originalSourceLines, patch);
+                
+                String fileName = mainClassName + ".java";
+                Path modifiedSourceFile = tempDir.resolve(fileName);
+                Files.write(modifiedSourceFile, modifiedLines);
+
+                CompilationResult compileResult = compile(modifiedSourceFile.toFile(), testSourcePath);
+                
+                if (!compileResult.success) {
+                    return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+                }
+
+                TestExecutionResult testResult = runTests(compileResult.classPath);
+                
+                double fitness = calculateFitness(testResult.passingCount, testResult.failingCount);
+                boolean allPass = testResult.failingCount == 0 && testResult.totalCount > 0 && testResult.passingCount > 0;
+
+                return new FitnessResult(
+                    testResult.passingCount,
+                    testResult.failingCount,
+                    testResult.totalCount,
+                    fitness,
+                    true,
+                    allPass
+                );
+
+            } catch (Exception e) {
+                return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+            }
+        });
+        
+        try {
+            return future.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+        } catch (Exception e) {
+            return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private List<String> applyPatch(List<String> originalLines, Patch patch) {
+        List<String> result = new ArrayList<>(originalLines);
+        
+        // Sort edits by line number in descending order to avoid index shifting issues
+        List<edu.passau.apr.model.Edit> sortedEdits = patch.getEdits().stream()
+            .sorted((a, b) -> Integer.compare(b.getLineNumber(), a.getLineNumber()))
+            .collect(Collectors.toList());
+
+        for (edu.passau.apr.model.Edit edit : sortedEdits) {
+            int lineIndex = edit.getLineNumber() - 1;
+            
+            if (lineIndex < 0 || lineIndex >= result.size()) {
+                continue;
+            }
+
+            switch (edit.getType()) {
+                case DELETE:
+                    result.remove(lineIndex);
+                    break;
+                case INSERT:
+                    if (edit.getContent() != null) {
+                        result.add(lineIndex, edit.getContent());
+                    }
+                    break;
+                case REPLACE:
+                    result.remove(lineIndex);
+                    if (edit.getContent() != null) {
+                        result.add(lineIndex, edit.getContent());
+                    }
+                    break;
+            }
+        }
+
+        return result;
+    }
+
+    private CompilationResult compile(File sourceFile, String testSourcePath) {
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        if (compiler == null) {
+            return new CompilationResult(false, null);
+        }
+
+        StandardJavaFileManager fileManager = compiler.getStandardFileManager(null, null, null);
+        
+        try {
+            Path outputDir = tempDir.resolve("classes");
+            Files.createDirectories(outputDir);
+            fileManager.setLocation(StandardLocation.CLASS_OUTPUT, 
+                                   java.util.Arrays.asList(outputDir.toFile()));
+
+            List<File> sourceFiles = new ArrayList<>();
+            sourceFiles.add(sourceFile);
+            
+            JavaCompiler.CompilationTask sourceTask = compiler.getTask(
+                null, fileManager, null, null, null,
+                fileManager.getJavaFileObjectsFromFiles(sourceFiles)
+            );
+
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            Future<Boolean> future = executor.submit(() -> sourceTask.call());
+            
+            boolean sourceSuccess = false;
+            try {
+                sourceSuccess = future.get(3, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                sourceSuccess = false;
+            } catch (Exception e) {
+                sourceSuccess = false;
+            } finally {
+                executor.shutdownNow();
+            }
+            
+            fileManager.close();
+            
+            if (!sourceSuccess) {
+                return new CompilationResult(false, null);
+            }
+
+            String classpath = outputDir.toString() + ":" + testClassesDir.toString();
+            return new CompilationResult(true, classpath);
+
+        } catch (IOException e) {
+            return new CompilationResult(false, null);
+        }
+    }
+
+    private TestExecutionResult runTests(String classPath) {
+        try {
+            return runTestsWithJUnitLauncher(classPath);
+        } catch (Exception e) {
+            return new TestExecutionResult(0, 0, 0);
+        }
+    }
+
+    private TestExecutionResult runTestsWithJUnitLauncher(String classPath) {
+        // Use reflection-based approach as JUnit Platform Launcher requires more setup
+        return runTestsWithReflection(classPath);
+    }
+
+    private TestExecutionResult runTestsWithReflection(String classPath) {
+        int passingCount = 0;
+        int failingCount = 0;
+        int totalCount = 0;
+
+        URLClassLoader classLoader = null;
+        try {
+            String systemClasspath = System.getProperty("java.class.path");
+            List<URL> urls = new ArrayList<>();
+            
+            String[] classPathEntries = classPath.split(":");
+            for (String entry : classPathEntries) {
+                if (!entry.isEmpty()) {
+                    try {
+                        File f = new File(entry);
+                        if (f.exists()) {
+                            urls.add(f.toURI().toURL());
+                        }
+                    } catch (Exception e) {
+                    }
+                }
+            }
+            if (systemClasspath != null) {
+                String[] entries = systemClasspath.split(System.getProperty("path.separator", ":"));
+                for (String entry : entries) {
+                    if (!entry.isEmpty()) {
+                        try {
+                            File f = new File(entry);
+                            if (f.exists()) {
+                                urls.add(f.toURI().toURL());
+                            }
+                        } catch (Exception e) {
+                        }
+                    }
+                }
+            }
+            
+            if (urls.isEmpty()) {
+                return new TestExecutionResult(0, 0, 0);
+            }
+            
+            classLoader = new URLClassLoader(urls.toArray(new URL[0]), null);
+
+            for (String testClassName : testClassNames) {
+                try {
+                    Class<?> testClass = classLoader.loadClass(testClassName);
+                    
+                    // Find and run test methods
+                    java.lang.reflect.Method[] methods = testClass.getDeclaredMethods();
+                    for (java.lang.reflect.Method method : methods) {
+                        // Check for @Test annotation by name (to avoid import issues)
+                        boolean hasTestAnnotation = false;
+                        try {
+                            for (java.lang.annotation.Annotation ann : method.getAnnotations()) {
+                                if (ann.annotationType().getSimpleName().equals("Test")) {
+                                    hasTestAnnotation = true;
+                                    break;
+                                }
+                            }
+                        } catch (Exception e) {
+                        }
+                        
+                        if (hasTestAnnotation) {
+                            totalCount++;
+                            try {
+                                Object testInstance = testClass.getDeclaredConstructor().newInstance();
+                                
+                                ExecutorService executor = Executors.newSingleThreadExecutor();
+                                Future<?> future = executor.submit(() -> {
+                                    try {
+                                        method.invoke(testInstance);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                });
+                                
+                                try {
+                                    future.get(5, TimeUnit.SECONDS);
+                                    passingCount++;
+                                } catch (TimeoutException e) {
+                                    future.cancel(true);
+                                    failingCount++;
+                                } catch (ExecutionException e) {
+                                    failingCount++;
+                                } finally {
+                                    executor.shutdownNow();
+                                }
+                            } catch (Exception e) {
+                                failingCount++;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                }
+            }
+
+        } catch (Exception e) {
+        } finally {
+            if (classLoader != null) {
+                try {
+                    classLoader.close();
+                } catch (Exception e) {
+                }
+            }
+        }
+
+        return new TestExecutionResult(passingCount, failingCount, totalCount);
+    }
+
+    private double calculateFitness(int passingTests, int failingTests) {
+        return positiveTestWeight * passingTests - negativeTestWeight * failingTests;
+    }
+
+
+    public void cleanup() {
+        try {
+            Files.walk(tempDir)
+                .sorted((a, b) -> -a.compareTo(b))
+                .forEach(path -> {
+                    try {
+                        Files.delete(path);
+                    } catch (IOException e) {
+                    }
+                });
+        } catch (IOException e) {
+        }
+    }
+
+    private static class CompilationResult {
+        final boolean success;
+        final String classPath;
+
+        CompilationResult(boolean success, String classPath) {
+            this.success = success;
+            this.classPath = classPath;
+        }
+    }
+
+    private static class TestExecutionResult {
+        final int passingCount;
+        final int failingCount;
+        final int totalCount;
+
+        TestExecutionResult(int passingCount, int failingCount, int totalCount) {
+            this.passingCount = passingCount;
+            this.failingCount = failingCount;
+            this.totalCount = totalCount;
+        }
+    }
+}
+
