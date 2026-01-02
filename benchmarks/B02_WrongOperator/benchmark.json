@@ -1,0 +1,10 @@
+{
+  "name": "B02_WrongOperator",
+  "buggySourcePath": "buggy/StringUtils.java",
+  "fixedSourcePath": "fixed/StringUtils.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "StringUtils",
+  "testClassNames": ["StringUtilsTest"]
+}
+
