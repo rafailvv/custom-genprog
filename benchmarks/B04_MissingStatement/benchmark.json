@@ -1,0 +1,10 @@
+{
+  "name": "B04_MissingStatement",
+  "buggySourcePath": "buggy/MathUtils.java",
+  "fixedSourcePath": "fixed/MathUtils.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "MathUtils",
+  "testClassNames": ["MathUtilsTest"]
+}
+
