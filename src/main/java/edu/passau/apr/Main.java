@@ -51,6 +51,7 @@ public class Main {
             WeightedPathSelector pathSelector = new WeightedPathSelector(weights, random);
             FitnessEvaluator fitnessEvaluator = new FitnessEvaluator(
                 benchmarkConfig.getBuggySourcePath(),
+                benchmarkConfig.getFixedSourcePath(),
                 benchmarkConfig.getTestSourcePath(),
                 benchmarkConfig.getTestClassNames(),
                 config.getPositiveTestWeight(),

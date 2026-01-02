@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
  */
 public class FitnessEvaluator {
     private final String buggySourcePath;
+    private final String fixedSourcePath;
     private final String testSourcePath;
     private final List<String> testClassNames;
     private final double positiveTestWeight;
@@ -33,11 +34,12 @@ public class FitnessEvaluator {
     private final String mainClassName;
     private final Path testClassesDir; // Pre-compiled test classes
 
-    public FitnessEvaluator(String buggySourcePath, String testSourcePath, 
+    public FitnessEvaluator(String buggySourcePath, String fixedSourcePath, String testSourcePath, 
                            List<String> testClassNames,
                            double positiveTestWeight, double negativeTestWeight,
                            String mainClassName) throws IOException {
         this.buggySourcePath = buggySourcePath;
+        this.fixedSourcePath = fixedSourcePath;
         this.testSourcePath = testSourcePath;
         this.testClassNames = new ArrayList<>(testClassNames);
         this.positiveTestWeight = positiveTestWeight;
@@ -60,7 +62,11 @@ public class FitnessEvaluator {
                                    java.util.Arrays.asList(testClassesDir.toFile()));
             
             List<File> allFiles = new ArrayList<>();
-            allFiles.add(new File(buggySourcePath));
+            File sourceFile = new File(buggySourcePath);
+            if (fixedSourcePath != null && new File(fixedSourcePath).exists()) {
+                sourceFile = new File(fixedSourcePath);
+            }
+            allFiles.add(sourceFile);
             Path testPath = Paths.get(testSourcePath);
             if (Files.isDirectory(testPath)) {
                 try (java.util.stream.Stream<Path> stream = Files.walk(testPath)) {
