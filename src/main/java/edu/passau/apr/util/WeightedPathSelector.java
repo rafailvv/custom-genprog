@@ -60,18 +60,5 @@ public class WeightedPathSelector {
         // Fallback to last element
         return weights.get(weights.size() - 1).getLineNumber();
     }
-
-    /**
-     * Gets all line numbers that have non-zero weight.
-     */
-    public List<Integer> getWeightedLines() {
-        List<Integer> lines = new ArrayList<>();
-        for (StatementWeight sw : weights) {
-            if (sw.getWeight() > 0.0) {
-                lines.add(sw.getLineNumber());
-            }
-        }
-        return lines;
-    }
 }
 
