@@ -86,20 +86,20 @@ public class Main {
             GeneticAlgorithm.AlgorithmResult result = ga.run();
             System.out.println();
             System.out.println("=== Results ===");
-            System.out.println("Generations: " + result.getGenerations());
-            System.out.println("Time: " + (result.getElapsedTimeMs() / 1000.0) + " seconds");
+            System.out.println("Generations: " + result.generations());
+            System.out.println("Time: " + (result.elapsedTimeMs() / 1000.0) + " seconds");
             
             if (result.foundSolution()) {
                 System.out.println("SUCCESS: Found a patch that passes all tests!");
                 System.out.println();
                 System.out.println("Patch:");
-                System.out.println(result.getBestPatch().toString());
+                System.out.println(result.bestPatch().toString());
                 
-                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.getBestPatch());
+                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.bestPatch());
             } else {
                 System.out.println("No solution found within limits.");
-                if (result.getBestFitness() != null) {
-                    System.out.println("Best fitness: " + result.getBestFitness().toString());
+                if (result.bestFitness() != null) {
+                    System.out.println("Best fitness: " + result.bestFitness().toString());
                 }
             }
 

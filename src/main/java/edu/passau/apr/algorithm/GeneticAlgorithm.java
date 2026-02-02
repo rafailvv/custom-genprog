@@ -62,7 +62,7 @@ public class GeneticAlgorithm {
         evaluatePopulation();
         logProgress();
 
-        while (!shouldStop()) {
+        while (!isFinished()) {
             currentGeneration++;
 
             List<Patch> newPopulation = new ArrayList<>();
@@ -112,7 +112,7 @@ public class GeneticAlgorithm {
             FitnessResult fitness = fitnessEvaluator.evaluate(patch, originalSourceLines);
             fitnesses.add(fitness);
 
-            if (bestFitness == null || fitness.getFitness() > bestFitness.getFitness()) {
+            if (bestFitness == null || fitness.fitness() > bestFitness.fitness()) {
                 bestFitness = fitness;
                 bestPatch = patch;
             }
@@ -123,7 +123,7 @@ public class GeneticAlgorithm {
         }
     }
 
-    private boolean shouldStop() {
+    private boolean isFinished() {
         if (bestFitness != null && bestFitness.allTestsPass()) {
             return true;
         }
@@ -140,46 +140,17 @@ public class GeneticAlgorithm {
     }
 
     private void logProgress() {
-        System.out.println(String.format(
-            "Generation %d: Best fitness = %.2f (Passing: %d, Failing: %d)",
+        System.out.printf(
+            "Generation %d: Best fitness = %.2f (Passing: %d, Failing: %d)%n",
             currentGeneration,
-            bestFitness != null ? bestFitness.getFitness() : Double.NEGATIVE_INFINITY,
-            bestFitness != null ? bestFitness.getPassingTests() : 0,
-            bestFitness != null ? bestFitness.getFailingTests() : 0
-        ));
+            bestFitness != null ? bestFitness.fitness() : Double.NEGATIVE_INFINITY,
+            bestFitness != null ? bestFitness.passingTests() : 0,
+            bestFitness != null ? bestFitness.failingTests() : 0
+        );
         System.out.flush();
     }
 
-    public static class AlgorithmResult {
-        private final Patch bestPatch;
-        private final FitnessResult bestFitness;
-        private final int generations;
-        private final long elapsedTimeMs;
-
-        public AlgorithmResult(Patch bestPatch, FitnessResult bestFitness, 
-                              int generations, long elapsedTimeMs) {
-            this.bestPatch = bestPatch;
-            this.bestFitness = bestFitness;
-            this.generations = generations;
-            this.elapsedTimeMs = elapsedTimeMs;
-        }
-
-        public Patch getBestPatch() {
-            return bestPatch;
-        }
-
-        public FitnessResult getBestFitness() {
-            return bestFitness;
-        }
-
-        public int getGenerations() {
-            return generations;
-        }
-
-        public long getElapsedTimeMs() {
-            return elapsedTimeMs;
-        }
-
+    public record AlgorithmResult(Patch bestPatch, FitnessResult bestFitness, int generations, long elapsedTimeMs) {
         public boolean foundSolution() {
             return bestFitness != null && bestFitness.allTestsPass();
         }

@@ -29,7 +29,7 @@ public class SelectionOperator {
         for (int i = 0; i < tournamentSize; i++) {
             int index = random.nextInt(population.size());
             Patch candidate = population.get(index);
-            double fitness = fitnesses.get(index).getFitness();
+            double fitness = fitnesses.get(index).fitness();
 
             if (fitness > bestFitness) {
                 bestFitness = fitness;
