@@ -11,9 +11,17 @@ public class MathUtilsTest {
     }
 
     @Test
-    public void testPower() {
+    public void testPower_positiveExponent() {
         assertEquals(8, MathUtils.power(2, 3));
+    }
+
+    @Test
+    public void testPower_zeroExponent() {
         assertEquals(1, MathUtils.power(5, 0));
+    }
+
+    @Test
+    public void testPower_square() {
         assertEquals(25, MathUtils.power(5, 2));
     }
 }

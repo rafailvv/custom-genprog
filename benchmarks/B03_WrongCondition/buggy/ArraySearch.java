@@ -12,4 +12,3 @@ public class ArraySearch {
         return findIndex(array, value) >= 0;
     }
 }
-
