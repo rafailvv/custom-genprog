@@ -4,7 +4,6 @@ import edu.passau.apr.evaluator.FitnessEvaluator;
 import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.operator.PatchGenerator;
-import edu.passau.apr.selection.SelectionOperator;
 import edu.passau.apr.util.Pair;
 
 import java.util.ArrayList;
@@ -26,7 +25,6 @@ public class GeneticAlgorithm {
     private final Random random;
     private final PatchGenerator patchGenerator;
     private final FitnessEvaluator fitnessEvaluator;
-    private final SelectionOperator selectionOperator;
     private final List<String> originalSourceLines;
 
     private List<Patch> population;
@@ -40,7 +38,6 @@ public class GeneticAlgorithm {
                            double mutationWeight, double crossoverRate,
                            Random random, PatchGenerator patchGenerator,
                            FitnessEvaluator fitnessEvaluator,
-                           SelectionOperator selectionOperator,
                            List<String> originalSourceLines) {
         this.populationSize = populationSize;
         this.maxGenerations = maxGenerations;
@@ -50,7 +47,6 @@ public class GeneticAlgorithm {
         this.random = random;
         this.patchGenerator = patchGenerator;
         this.fitnessEvaluator = fitnessEvaluator;
-        this.selectionOperator = selectionOperator;
         this.originalSourceLines = originalSourceLines;
     }
 

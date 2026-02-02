@@ -67,8 +67,6 @@ public class Main {
                 config.getMutationWeight(), 3
             );
 
-            SelectionOperator selectionOperator = new SelectionOperator(random, 3);
-
             GeneticAlgorithm ga = new GeneticAlgorithm(
                 config.getPopulationSize(),
                 config.getMaxGenerations(),
@@ -78,7 +76,6 @@ public class Main {
                 random,
                 patchGenerator,
                 fitnessEvaluator,
-                selectionOperator,
                 sourceLines
             );
 
