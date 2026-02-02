@@ -4,7 +4,6 @@ import edu.passau.apr.algorithm.GeneticAlgorithm;
 import edu.passau.apr.config.Config;
 import edu.passau.apr.evaluator.FitnessEvaluator;
 import edu.passau.apr.model.BenchmarkConfig;
-import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.operator.PatchGenerator;
@@ -26,6 +25,9 @@ import java.util.Random;
  * Implements GenProg algorithm for fixing bugs in Java programs.
  */
 public class Main {
+
+    private static final double CROSS_OVER_RATE = .5;
+
     public static void main(String[] args) {
         try {
             Config config = parseArguments(args);
@@ -70,9 +72,9 @@ public class Main {
             GeneticAlgorithm ga = new GeneticAlgorithm(
                 config.getPopulationSize(),
                 config.getMaxGenerations(),
-                config.getTimeLimitSec() * 1000L,
+                config.getTimeLimitSec() * 1_000L,
                 config.getMutationWeight(),
-                0.5,
+                CROSS_OVER_RATE,
                 random,
                 patchGenerator,
                 fitnessEvaluator,
@@ -93,8 +95,7 @@ public class Main {
                 System.out.println("Patch:");
                 System.out.println(result.getBestPatch().toString());
                 
-                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, 
-                              sourceLines, result.getBestPatch());
+                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.getBestPatch());
             } else {
                 System.out.println("No solution found within limits.");
                 if (result.getBestFitness() != null) {
@@ -168,20 +169,23 @@ public class Main {
     }
 
     private static void printUsage() {
-        System.out.println("Usage: java -jar apr-tool.jar [options]");
-        System.out.println();
-        System.out.println("Required options:");
-        System.out.println("  --benchmark <path>     Path to benchmark directory");
-        System.out.println();
-        System.out.println("Optional options:");
-        System.out.println("  --seed <number>        Random seed (default: current time)");
-        System.out.println("  --maxGenerations <n>   Maximum generations (default: 50)");
-        System.out.println("  --timeLimitSec <n>     Time limit in seconds (default: 60)");
-        System.out.println("  --populationSize <n>   Population size (default: 40)");
-        System.out.println("  --positiveTestWeight <w>  Weight for passing tests (default: 1.0)");
-        System.out.println("  --negativeTestWeight <w>  Weight for failing tests (default: 10.0)");
-        System.out.println("  --mutationWeight <w>   Mutation weight (default: 0.06)");
-        System.out.println("  --verbose              Enable verbose output");
+        String usage = """
+            Usage: java -jar apr-tool.jar [options]
+            
+            Required options:
+              --benchmark <path>     Path to benchmark directory
+            
+            Optional options:
+              --seed <number>        Random seed (default: current time)
+              --maxGenerations <n>   Maximum generations (default: 50)
+              --timeLimitSec <n>     Time limit in seconds (default: 60)
+              --populationSize <n>   Population size (default: 40)
+              --positiveTestWeight <w>  Weight for passing tests (default: 1.0)
+              --negativeTestWeight <w>  Weight for failing tests (default: 10.0)
+              --mutationWeight <w>   Mutation weight (default: 0.06)
+              --verbose              Enable verbose output
+            """;
+        System.out.println(usage);
     }
 
     private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig,
@@ -197,7 +201,7 @@ public class Main {
             Path patchedFile = outputDir.resolve(benchmarkConfig.getMainClassName() + ".java");
             Files.write(patchedFile, patchedLines);
 
-            System.out.println("Patched file saved to: " + patchedFile.toString());
+            System.out.println("Patched file saved to: " + patchedFile);
 
         } catch (IOException e) {
             System.err.println("Warning: Could not save patched file: " + e.getMessage());
