@@ -2,6 +2,7 @@ package edu.passau.apr.operator;
 
 import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.Patch;
+import edu.passau.apr.util.Pair;
 import edu.passau.apr.util.WeightedPathSelector;
 
 import java.util.List;
@@ -84,30 +85,33 @@ public class PatchGenerator {
     /**
      * Performs crossover between two parent patches.
      */
-    public Patch crossover(Patch parent1, Patch parent2) {
-        Patch child = new Patch();
+    public Pair<Patch, Patch> crossover(Patch p, Patch q) {
+        Patch c = new Patch();
+        Patch d = new Patch();
 
-        List<Edit> edits1 = parent1.getEdits();
-        for (Edit edit : edits1) {
-            if (random.nextDouble() < 0.5) {
-                child.addEdit(edit);
+        int lineCount = sourceLines.size();
+        int cutoff = random.nextInt(lineCount) + 1;
+
+        // swap edits around the cutoff line:
+        // c = p[1..cutoff] + q[cutoff+1..end]
+        // d = q[1..cutoff] + p[cutoff+1..end]
+
+        for (var edit : p.getEdits()) {
+            if (edit.lineNumber() > cutoff) {
+                d.addEdit(edit);
+            } else {
+                c.addEdit(edit);
+            }
+        }
+        for (var edit : q.getEdits()) {
+            if (edit.lineNumber() > cutoff) {
+                c.addEdit(edit);
+            } else {
+                d.addEdit(edit);
             }
         }
 
-        List<Edit> edits2 = parent2.getEdits();
-        for (Edit edit : edits2) {
-            if (random.nextDouble() < 0.5) {
-                child.addEdit(edit);
-            }
-        }
-
-        while (child.getEditCount() > maxEditsPerPatch) {
-            int editCount = child.getEditCount();
-            if (editCount == 0) break;
-            child.removeEdit(editCount - 1);
-        }
-
-        return child;
+        return new Pair<>(c, d);
     }
 
     private Edit generateRandomEdit() {

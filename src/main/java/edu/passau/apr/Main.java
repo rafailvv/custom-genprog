@@ -99,7 +99,11 @@ public class Main {
             } else {
                 System.out.println("No solution found within limits.");
                 if (result.bestFitness() != null) {
-                    System.out.println("Best fitness: " + result.bestFitness().toString());
+                    System.out.println("Best fitness: " + result.bestFitness());
+                    System.out.println("Best Patch:");
+                    System.out.println(result.bestPatch().toString());
+
+                    savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.bestPatch());
                 }
             }
 

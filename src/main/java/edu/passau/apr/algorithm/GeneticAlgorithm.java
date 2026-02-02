@@ -5,10 +5,13 @@ import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.operator.PatchGenerator;
 import edu.passau.apr.selection.SelectionOperator;
+import edu.passau.apr.util.Pair;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+
+import static java.util.Collections.shuffle;
 
 /**
  * Main genetic algorithm implementation for automated program repair.
@@ -65,34 +68,93 @@ public class GeneticAlgorithm {
         while (!isFinished()) {
             currentGeneration++;
 
+            List<Patch> viablePatches = new ArrayList<>();
             List<Patch> newPopulation = new ArrayList<>();
+            List<FitnessResult> viFit = new ArrayList<>();
 
-            if (bestPatch != null) {
-                newPopulation.add(bestPatch.copy());
-            }
-
-            while (newPopulation.size() < populationSize) {
-                Patch offspring;
-
-                if (random.nextDouble() < crossoverRate && population.size() >= 2) {
-                    Patch parent1 = selectionOperator.select(population, fitnesses);
-                    Patch parent2 = selectionOperator.select(population, fitnesses);
-                    offspring = patchGenerator.crossover(parent1, parent2);
-                } else {
-                    Patch parent = selectionOperator.select(population, fitnesses);
-                    offspring = patchGenerator.mutate(parent);
+            // Collect viable patches (where at least one test passes)
+            // Viable ← { (P, PathP) in Popul | f(P) > 0 }
+            for (int i = 0; i < population.size(); i++) {
+                if (fitnesses.get(i).passingTests() > 0) {
+                    viablePatches.add(population.get(i));
+                    viFit.add(fitnesses.get(i));
                 }
-
-                newPopulation.add(offspring);
             }
+
+            // crossover rate is 1 -> every surviving patch undergoes crossover (but only parent in one crossover generation)
+            var pairs = pairUp(select(viablePatches, viFit, populationSize / 2));
+            for (Pair<Patch, Patch> parents : pairs) {
+                Pair<Patch, Patch> offspring = patchGenerator.crossover(parents.first(), parents.second());
+
+                newPopulation.addAll(List.of(
+                    parents.first(),
+                    parents.second(),
+                    offspring.first(),
+                    offspring.second()
+                ));
+            }
+
+            // mutate all patches in the new population
+            newPopulation.replaceAll(patchGenerator::mutate);
 
             population = newPopulation;
             evaluatePopulation();
             logProgress();
         }
 
-        return new AlgorithmResult(bestPatch, bestFitness, currentGeneration, 
+        return new AlgorithmResult(bestPatch, bestFitness, currentGeneration,
                                   System.currentTimeMillis() - startTime);
+    }
+
+
+    /**
+     * Selects pairs of patches for reproduction.
+     * Randomly forms pairs from the list of patches.
+     */
+    private List<Pair<Patch, Patch>> pairUp(List<Patch> patches) {
+        List<Pair<Patch, Patch>> pairs = new ArrayList<>();
+        List<Patch> shuffled = new ArrayList<>(patches);
+        shuffle(shuffled, random);
+
+        if (shuffled.size() < 2) {
+            return List.of(new Pair<>(shuffled.get(0), shuffled.get(0)));
+        }
+
+        for (int i = 0; i < shuffled.size() - 1; i += 2) {
+            pairs.add(new Pair<>(shuffled.get(i), shuffled.get(i + 1)));
+        }
+
+        return pairs;
+    }
+
+    /**
+     * Selects selectionSize patches from viablePatches based on their fitness.
+     */
+    private List<Patch> select(List<Patch> viablePatches, List<FitnessResult> fitnesses, int selectionSize) {
+        List<Patch> selectedPatches = new ArrayList<>();
+        List<FitnessResult> selectedFs = new ArrayList<>();
+
+        for (int i = 0; i < viablePatches.size(); i++) {
+            if (selectedPatches.size() <= selectionSize) {
+                selectedPatches.add(viablePatches.get(i));
+                selectedFs.add(fitnesses.get(i));
+            } else {
+                int smallestFitnessIndex = 0;
+                double smallestFitnessValue = selectedFs.get(0).fitness();
+                for (int j = 0; j < selectedPatches.size(); j++) {
+                    if (selectedFs.get(j).fitness() < smallestFitnessValue) {
+                        smallestFitnessValue = selectedFs.get(j).fitness();
+                        smallestFitnessIndex = j;
+                    }
+                }
+                if (fitnesses.get(i).fitness() > smallestFitnessValue) {
+                    selectedPatches.set(smallestFitnessIndex, viablePatches.get(i));
+                    selectedFs.set(smallestFitnessIndex, fitnesses.get(i));
+                }
+            }
+        }
+
+        return selectedPatches;
     }
 
     private void initializePopulation() {
@@ -132,11 +194,7 @@ public class GeneticAlgorithm {
             return true;
         }
 
-        if (System.currentTimeMillis() - startTime >= timeLimitMs) {
-            return true;
-        }
-
-        return false;
+        return System.currentTimeMillis() - startTime >= timeLimitMs;
     }
 
     private void logProgress() {
