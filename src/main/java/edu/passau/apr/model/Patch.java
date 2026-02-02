@@ -80,7 +80,7 @@ public class Patch {
 
             switch (edit.type()) {
                 case DELETE:
-                    result.remove(lineIndex);
+                    result.set(lineIndex, "");
                     break;
 
                 case INSERT:
