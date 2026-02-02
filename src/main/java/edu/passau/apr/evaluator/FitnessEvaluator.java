@@ -1,5 +1,6 @@
 package edu.passau.apr.evaluator;
 
+import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
 
@@ -152,30 +153,30 @@ public class FitnessEvaluator {
         List<String> result = new ArrayList<>(originalLines);
         
         // Sort edits by line number in descending order to avoid index shifting issues
-        List<edu.passau.apr.model.Edit> sortedEdits = patch.getEdits().stream()
-            .sorted((a, b) -> Integer.compare(b.getLineNumber(), a.getLineNumber()))
-            .collect(Collectors.toList());
+        List<Edit> sortedEdits = patch.getEdits().stream()
+            .sorted((a, b) -> Integer.compare(b.lineNumber(), a.lineNumber()))
+            .toList();
 
-        for (edu.passau.apr.model.Edit edit : sortedEdits) {
-            int lineIndex = edit.getLineNumber() - 1;
+        for (Edit edit : sortedEdits) {
+            int lineIndex = edit.lineNumber() - 1;
             
             if (lineIndex < 0 || lineIndex >= result.size()) {
                 continue;
             }
 
-            switch (edit.getType()) {
+            switch (edit.type()) {
                 case DELETE:
                     result.remove(lineIndex);
                     break;
                 case INSERT:
-                    if (edit.getContent() != null) {
-                        result.add(lineIndex, edit.getContent());
+                    if (edit.content() != null) {
+                        result.add(lineIndex, edit.content());
                     }
                     break;
                 case REPLACE:
                     result.remove(lineIndex);
-                    if (edit.getContent() != null) {
-                        result.add(lineIndex, edit.getContent());
+                    if (edit.content() != null) {
+                        result.add(lineIndex, edit.content());
                     }
                     break;
             }

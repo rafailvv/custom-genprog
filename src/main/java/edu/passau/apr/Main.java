@@ -4,6 +4,7 @@ import edu.passau.apr.algorithm.GeneticAlgorithm;
 import edu.passau.apr.config.Config;
 import edu.passau.apr.evaluator.FitnessEvaluator;
 import edu.passau.apr.model.BenchmarkConfig;
+import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.operator.PatchGenerator;
@@ -206,30 +207,30 @@ public class Main {
     private static List<String> applyPatch(List<String> originalLines, Patch patch) {
         List<String> result = new java.util.ArrayList<>(originalLines);
         
-        List<edu.passau.apr.model.Edit> sortedEdits = patch.getEdits().stream()
-            .sorted((a, b) -> Integer.compare(b.getLineNumber(), a.getLineNumber()))
-            .collect(java.util.stream.Collectors.toList());
+        List<Edit> sortedEdits = patch.getEdits().stream()
+            .sorted((a, b) -> Integer.compare(b.lineNumber(), a.lineNumber()))
+            .toList();
 
-        for (edu.passau.apr.model.Edit edit : sortedEdits) {
-            int lineIndex = edit.getLineNumber() - 1;
+        for (Edit edit : sortedEdits) {
+            int lineIndex = edit.lineNumber() - 1;
             
             if (lineIndex < 0 || lineIndex >= result.size()) {
                 continue;
             }
 
-            switch (edit.getType()) {
+            switch (edit.type()) {
                 case DELETE:
                     result.remove(lineIndex);
                     break;
                 case INSERT:
-                    if (edit.getContent() != null) {
-                        result.add(lineIndex, edit.getContent());
+                    if (edit.content() != null) {
+                        result.add(lineIndex, edit.content());
                     }
                     break;
                 case REPLACE:
                     result.remove(lineIndex);
-                    if (edit.getContent() != null) {
-                        result.add(lineIndex, edit.getContent());
+                    if (edit.content() != null) {
+                        result.add(lineIndex, edit.content());
                     }
                     break;
             }

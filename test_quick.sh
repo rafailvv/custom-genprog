@@ -20,4 +20,3 @@ for bench in "${BENCHMARKS[@]}"; do
 done
 
 echo "=== Test Complete ==="
-
