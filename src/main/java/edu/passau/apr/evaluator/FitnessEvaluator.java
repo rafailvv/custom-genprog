@@ -1,8 +1,8 @@
 package edu.passau.apr.evaluator;
 
-import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
+import org.junit.platform.engine.TestExecutionResult;
 
 import javax.tools.JavaCompiler;
 import javax.tools.StandardJavaFileManager;
@@ -18,13 +18,16 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 /**
  * Evaluates fitness of a patch by compiling the modified code
  * and running tests against it.
  */
 public class FitnessEvaluator {
+
+    private record CompilationResult(boolean success, String classPath) {}
+    private record TestExecutionResult(int passingCount, int failingCount, int totalCount) {}
+
     private final String buggySourcePath;
     private final String fixedSourcePath;
     private final String testSourcePath;
@@ -59,8 +62,7 @@ public class FitnessEvaluator {
             if (compiler == null) return;
             
             StandardJavaFileManager fileManager = compiler.getStandardFileManager(null, null, null);
-            fileManager.setLocation(StandardLocation.CLASS_OUTPUT, 
-                                   java.util.Arrays.asList(testClassesDir.toFile()));
+            fileManager.setLocation(StandardLocation.CLASS_OUTPUT, List.of(testClassesDir.toFile()));
             
             List<File> allFiles = new ArrayList<>();
             File sourceFile = new File(buggySourcePath);
@@ -106,7 +108,7 @@ public class FitnessEvaluator {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<FitnessResult> future = executor.submit(() -> {
             try {
-                List<String> modifiedLines = applyPatch(originalSourceLines, patch);
+                List<String> modifiedLines = patch.applyTo(originalSourceLines);
                 
                 String fileName = mainClassName + ".java";
                 Path modifiedSourceFile = tempDir.resolve(fileName);
@@ -149,42 +151,6 @@ public class FitnessEvaluator {
         }
     }
 
-    private List<String> applyPatch(List<String> originalLines, Patch patch) {
-        List<String> result = new ArrayList<>(originalLines);
-        
-        // Sort edits by line number in descending order to avoid index shifting issues
-        List<Edit> sortedEdits = patch.getEdits().stream()
-            .sorted((a, b) -> Integer.compare(b.lineNumber(), a.lineNumber()))
-            .toList();
-
-        for (Edit edit : sortedEdits) {
-            int lineIndex = edit.lineNumber() - 1;
-            
-            if (lineIndex < 0 || lineIndex >= result.size()) {
-                continue;
-            }
-
-            switch (edit.type()) {
-                case DELETE:
-                    result.remove(lineIndex);
-                    break;
-                case INSERT:
-                    if (edit.content() != null) {
-                        result.add(lineIndex, edit.content());
-                    }
-                    break;
-                case REPLACE:
-                    result.remove(lineIndex);
-                    if (edit.content() != null) {
-                        result.add(lineIndex, edit.content());
-                    }
-                    break;
-            }
-        }
-
-        return result;
-    }
-
     private CompilationResult compile(File sourceFile, String testSourcePath) {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
@@ -196,8 +162,7 @@ public class FitnessEvaluator {
         try {
             Path outputDir = tempDir.resolve("classes");
             Files.createDirectories(outputDir);
-            fileManager.setLocation(StandardLocation.CLASS_OUTPUT, 
-                                   java.util.Arrays.asList(outputDir.toFile()));
+            fileManager.setLocation(StandardLocation.CLASS_OUTPUT, List.of(outputDir.toFile()));
 
             List<File> sourceFiles = new ArrayList<>();
             sourceFiles.add(sourceFile);
@@ -208,16 +173,14 @@ public class FitnessEvaluator {
             );
 
             ExecutorService executor = Executors.newSingleThreadExecutor();
-            Future<Boolean> future = executor.submit(() -> sourceTask.call());
+            Future<Boolean> future = executor.submit(sourceTask);
             
             boolean sourceSuccess = false;
             try {
                 sourceSuccess = future.get(3, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 future.cancel(true);
-                sourceSuccess = false;
-            } catch (Exception e) {
-                sourceSuccess = false;
+            } catch (Exception ignored) {
             } finally {
                 executor.shutdownNow();
             }
@@ -228,7 +191,7 @@ public class FitnessEvaluator {
                 return new CompilationResult(false, null);
             }
 
-            String classpath = outputDir.toString() + ":" + testClassesDir.toString();
+            String classpath = outputDir + ":" + testClassesDir.toString();
             return new CompilationResult(true, classpath);
 
         } catch (IOException e) {
@@ -374,28 +337,6 @@ public class FitnessEvaluator {
                     }
                 });
         } catch (IOException e) {
-        }
-    }
-
-    private static class CompilationResult {
-        final boolean success;
-        final String classPath;
-
-        CompilationResult(boolean success, String classPath) {
-            this.success = success;
-            this.classPath = classPath;
-        }
-    }
-
-    private static class TestExecutionResult {
-        final int passingCount;
-        final int failingCount;
-        final int totalCount;
-
-        TestExecutionResult(int passingCount, int failingCount, int totalCount) {
-            this.passingCount = passingCount;
-            this.failingCount = failingCount;
-            this.totalCount = totalCount;
         }
     }
 }

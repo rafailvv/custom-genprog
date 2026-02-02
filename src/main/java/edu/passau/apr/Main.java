@@ -187,7 +187,7 @@ public class Main {
     private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig,
                                        List<String> originalLines, Patch patch) {
         try {
-            List<String> patchedLines = applyPatch(originalLines, patch);
+            List<String> patchedLines = patch.applyTo(originalLines);
 
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             Path outputDir = Paths.get("out", Paths.get(benchmarkPath).getFileName().toString(), 
@@ -202,41 +202,6 @@ public class Main {
         } catch (IOException e) {
             System.err.println("Warning: Could not save patched file: " + e.getMessage());
         }
-    }
-
-    private static List<String> applyPatch(List<String> originalLines, Patch patch) {
-        List<String> result = new java.util.ArrayList<>(originalLines);
-        
-        List<Edit> sortedEdits = patch.getEdits().stream()
-            .sorted((a, b) -> Integer.compare(b.lineNumber(), a.lineNumber()))
-            .toList();
-
-        for (Edit edit : sortedEdits) {
-            int lineIndex = edit.lineNumber() - 1;
-            
-            if (lineIndex < 0 || lineIndex >= result.size()) {
-                continue;
-            }
-
-            switch (edit.type()) {
-                case DELETE:
-                    result.remove(lineIndex);
-                    break;
-                case INSERT:
-                    if (edit.content() != null) {
-                        result.add(lineIndex, edit.content());
-                    }
-                    break;
-                case REPLACE:
-                    result.remove(lineIndex);
-                    if (edit.content() != null) {
-                        result.add(lineIndex, edit.content());
-                    }
-                    break;
-            }
-        }
-
-        return result;
     }
 }
 

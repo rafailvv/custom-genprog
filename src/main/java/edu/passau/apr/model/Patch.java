@@ -32,6 +32,18 @@ public class Patch {
         return new ArrayList<>(edits);
     }
 
+    /**
+     * Sort edits by line number in descending order to avoid index shifting issues
+     *
+     * @return all edits in descending order
+     */
+    public List<Edit> getSortedEdits() {
+        return getEdits()
+                .stream()
+                .sorted((a, b) -> Integer.compare(b.lineNumber(), a.lineNumber()))
+                .toList();
+    }
+
     public int getEditCount() {
         return edits.size();
     }
@@ -54,6 +66,39 @@ public class Patch {
             sb.append(edit.toString()).append("\n");
         }
         return sb.toString();
+    }
+
+    public List<String> applyTo(List<String> originalLines) {
+        List<String> result = new ArrayList<>(originalLines);
+
+        for (Edit edit : getSortedEdits()) {
+            int lineIndex = edit.lineNumber() - 1;
+
+            if (lineIndex < 0 || lineIndex >= result.size()) {
+                continue;
+            }
+
+            switch (edit.type()) {
+                case DELETE:
+                    result.remove(lineIndex);
+                    break;
+
+                case INSERT:
+                    if (edit.content() != null) {
+                        result.add(lineIndex, edit.content());
+                    }
+                    break;
+
+                case REPLACE:
+                    result.remove(lineIndex);
+                    if (edit.content() != null) {
+                        result.add(lineIndex, edit.content());
+                    }
+                    break;
+            }
+        }
+
+        return result;
     }
 }
 
