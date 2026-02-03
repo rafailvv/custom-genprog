@@ -53,6 +53,13 @@ public class Patch {
     public void doMutations(double mutationRate, Random random) {
         int i = 0;
         for (Statement stmt : compilationUnit.findAll(Statement.class)) {
+
+            // skip block statements for insertions as parent might not be a block statement
+            // TODO how should we handle this properly?
+            if (stmt.isBlockStmt()) {
+                i++; continue;
+            }
+
             Double weight = nodeWeightMap.getOrDefault(stmt, 0.1); // assume 0.1 for modified statements
             if (random.nextDouble() < mutationRate && random.nextDouble() < weight) {
                 var operation = choose(random, Edit.Type.values());
