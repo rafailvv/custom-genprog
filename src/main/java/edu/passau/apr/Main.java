@@ -7,7 +7,6 @@ import edu.passau.apr.model.BenchmarkConfig;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.operator.PatchGenerator;
-import edu.passau.apr.selection.SelectionOperator;
 import edu.passau.apr.util.BenchmarkLoader;
 import edu.passau.apr.util.WeightedPathSelector;
 
