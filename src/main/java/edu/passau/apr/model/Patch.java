@@ -111,4 +111,14 @@ public class Patch {
     public CompilationUnit getCompilationUnit() {
         return compilationUnit;
     }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Patch with ").append(edits.size()).append(" edits:\n");
+        for (Edit edit : edits) {
+            sb.append(edit).append("\n");
+        }
+        return sb.toString();
+    }
 }
