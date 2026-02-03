@@ -1,21 +1,23 @@
 package edu.passau.apr.model;
 
+import com.github.javaparser.ast.stmt.Statement;
+
 /**
  * Represents a single edit operation in a patch.
  * An edit can be DELETE, INSERT, or REPLACE.
  *
- * @param content For INSERT/REPLACE: the statement to insert/replace with
+ * @param donorStatementIndex For INSERT/REPLACE: the statement to insert/replace with
  */
-public record Edit(Type type, int lineNumber, String content) {
+public record Edit(Type type, int statementIndex, Integer donorStatementIndex) {
     public enum Type {
         DELETE,
         INSERT,
-        REPLACE
+        SWAP
     }
 
     @Override
     public String toString() {
-        return String.format("%s at line %d: %s", type, lineNumber, content != null ? content : "");
+        return String.format("%s at line %d: %s", type, statementIndex, donorStatementIndex != null ? donorStatementIndex : "");
     }
 }
 

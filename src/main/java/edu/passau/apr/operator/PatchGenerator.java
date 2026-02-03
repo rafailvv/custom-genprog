@@ -3,7 +3,6 @@ package edu.passau.apr.operator;
 import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.util.Pair;
-import edu.passau.apr.util.WeightedPathSelector;
 
 import java.util.List;
 import java.util.Random;
@@ -15,60 +14,23 @@ public class PatchGenerator {
     private static final int DEFAULT_MAX_EDITS_PER_PATCH = 5;
 
     private final Random random;
-    private final WeightedPathSelector pathSelector;
-    private final List<String> sourceLines;
+    private final String source;
     private final double mutationWeight;
 
-    private final DeleteOperator deleteOp;
-    private final InsertOperator insertOp;
-    private final ReplaceOperator replaceOp;
-
-    public PatchGenerator(Random random, WeightedPathSelector pathSelector, 
-                         List<String> sourceLines, double mutationWeight) {
+    public PatchGenerator(Random random,
+                         String source, double mutationWeight) {
         this.random = random;
-        this.pathSelector = pathSelector;
-        this.sourceLines = sourceLines;
+        this.source = source;
         this.mutationWeight = mutationWeight;
-
-        this.deleteOp = new DeleteOperator(random, pathSelector, sourceLines);
-        this.insertOp = new InsertOperator(random, pathSelector, sourceLines);
-        this.replaceOp = new ReplaceOperator(random, pathSelector, sourceLines);
     }
 
     /**
      * Generates a random initial patch.
      */
     public Patch generateRandomPatch() {
-        Patch patch = new Patch();
-        int numEdits = 1 + random.nextInt(DEFAULT_MAX_EDITS_PER_PATCH);
-
-        for (int i = 0; i < numEdits; i++) {
-            Edit edit = generateRandomEdit();
-            if (edit != null) {
-                patch.addEdit(edit);
-            }
-        }
-
+        Patch patch = new Patch(source, sussyscory); // TODO
+        patch.doMutations(mutationWeight, random);
         return patch;
-    }
-
-    /**
-     * Mutates an existing patch.
-     */
-    public Patch mutate(Patch original) {
-        Patch mutated = original.copy();
-
-        // TODO instead of one new edit, it should loop through all statements and
-        // mutate with probability mutationWeight * suspiciousness. See paper fig. 3.
-
-        if (random.nextDouble() < mutationWeight) {
-            Edit newEdit = generateRandomEdit();
-            if (newEdit != null) {
-                mutated.addEdit(newEdit);
-            }
-        }
-
-        return mutated;
     }
 
     /**
@@ -101,18 +63,6 @@ public class PatchGenerator {
         }
 
         return new Pair<>(c, d);
-    }
-
-    private Edit generateRandomEdit() {
-        double rand = random.nextDouble();
-        
-        if (rand < 0.33) {
-            return deleteOp.apply();
-        } else if (rand < 0.66) {
-            return insertOp.apply();
-        } else {
-            return replaceOp.apply();
-        }
     }
 }
 

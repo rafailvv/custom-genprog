@@ -1,104 +1,97 @@
 package edu.passau.apr.model;
 
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.Statement;
+import edu.passau.apr.util.Pair;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+
+import static edu.passau.apr.model.Edit.Type.DELETE;
+import static edu.passau.apr.model.Edit.Type.INSERT;
+import static edu.passau.apr.model.Edit.Type.SWAP;
 
 /**
  * Represents a patch as a collection of edits.
  * A patch is applied to the buggy source code to create a candidate fix.
  */
 public class Patch {
-    private final List<Edit> edits;
+    private final CompilationUnit compilationUnit; // cache of the patched compilation unit
+    private final Map<Node, Double> nodeWeightMap; // map of suspicious values for nodes
+    private final List<Edit> edits = new ArrayList<>(); // list of edits applied one after another
 
-    public Patch() {
-        this.edits = new ArrayList<>();
+    public Patch(CompilationUnit compilationUnit, Map<Node, Double> nodeWeightMap) {
+        this.compilationUnit = compilationUnit.clone();
+        this.nodeWeightMap = nodeWeightMap;
     }
 
-    public Patch(List<Edit> edits) {
-        this.edits = new ArrayList<>(edits);
+    public Patch(String source, List<Double> nodeWeights) throws IOException {
+        this.nodeWeightMap = new HashMap<>();
+        this.compilationUnit = StaticJavaParser.parse(source);
+        this.compilationUnit.findAll(Statement.class).forEach(statement -> {
+            int line = statement.getBegin().map(p -> p.line).orElse(-1);
+            double weight = (line >= 1 && line <= nodeWeights.size()) ? nodeWeights.get(line - 1) : 0d;
+            nodeWeightMap.put(statement, weight);
+        });
     }
 
-    public void addEdit(Edit edit) {
-        edits.add(edit);
-    }
-
-    public void removeEdit(int index) {
-        if (index >= 0 && index < edits.size()) {
-            edits.remove(index);
-        }
-    }
-
-    public List<Edit> getEdits() {
-        return new ArrayList<>(edits);
-    }
-
-    /**
-     * Sort edits by line number in descending order to avoid index shifting issues
-     *
-     * @return all edits in descending order
-     */
-    public List<Edit> getSortedEdits() {
-        return getEdits()
-                .stream()
-                .sorted((a, b) -> Integer.compare(b.lineNumber(), a.lineNumber()))
-                .toList();
-    }
-
-    public int getEditCount() {
-        return edits.size();
-    }
-
-    public boolean isEmpty() {
-        return edits.isEmpty();
-    }
-
-    /**
-     * Creates a copy of this patch.
-     */
-    public Patch copy() {
-        return new Patch(this.edits);
-    }
-
-    @Override
-    public String toString() {
-        StringBuilder sb = new StringBuilder();
-        for (Edit edit : edits) {
-            sb.append(edit.toString()).append("\n");
-        }
-        return sb.toString();
-    }
-
-    public List<String> applyTo(List<String> originalLines) {
-        List<String> result = new ArrayList<>(originalLines);
-
-        for (Edit edit : getSortedEdits()) {
-            int lineIndex = edit.lineNumber() - 1;
-
-            if (lineIndex < 0 || lineIndex >= result.size()) {
-                continue;
+    public void doMutations(double mutationRate, Random random) {
+        int i = 0;
+        for (Statement stmt : compilationUnit.findAll(Statement.class)) {
+            Double weight = nodeWeightMap.getOrDefault(stmt, 0.1); // assume 0.1 for modified statements
+            if (random.nextDouble() < mutationRate && random.nextDouble() < weight) {
+                var operation = choose(random, Edit.Type.values());
+                switch (operation) {
+                    case DELETE -> {
+                        stmt.remove();
+                        edits.add(new Edit(DELETE, i, null));
+                    }
+                    case INSERT -> {
+                        var donorStmt = getDonorStatement(random);
+                        if (donorStmt != null) {
+                            int _i = i;
+                            stmt.getParentNode().map(n -> (BlockStmt) n).ifPresent(parent -> {
+                                parent.getStatements().addBefore(donorStmt.first(), stmt);
+                                edits.add(new Edit(INSERT, _i, donorStmt.second()));
+                            });
+                        }
+                    }
+                    case SWAP -> {
+                        var donorStmt = getDonorStatement(random);
+                        if (donorStmt != null) {
+                            stmt.replace(donorStmt.first().clone());
+                            donorStmt.first().replace(stmt.clone());
+                            edits.add(new Edit(SWAP, i, donorStmt.second()));
+                        }
+                    }
+                }
             }
 
-            switch (edit.type()) {
-                case DELETE:
-                    result.set(lineIndex, "");
-                    break;
-
-                case INSERT:
-                    if (edit.content() != null) {
-                        result.add(lineIndex, edit.content());
-                    }
-                    break;
-
-                case REPLACE:
-                    result.remove(lineIndex);
-                    if (edit.content() != null) {
-                        result.add(lineIndex, edit.content());
-                    }
-                    break;
-            }
+            i++;
         }
+    }
 
-        return result;
+    private Edit.Type choose(Random random, Edit.Type[] values) {
+        int index = random.nextInt(values.length);
+        return values[index];
+    }
+
+
+    private Pair<Statement, Integer> getDonorStatement(Random random) {
+        List<Statement> statements = compilationUnit.findAll(Statement.class);
+        if (statements.isEmpty()) {
+            return null;
+        }
+        int index = random.nextInt(statements.size());
+        return new Pair<>(statements.get(index), index);
     }
 }
-

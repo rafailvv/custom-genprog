@@ -104,24 +104,24 @@ public class FitnessEvaluator {
     /**
      * Applies a patch to the source code and evaluates its fitness.
      */
-    public FitnessResult evaluate(Patch patch, List<String> originalSourceLines) {
+    public FitnessResult evaluate(Patch patch, String patchedSource) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<FitnessResult> future = executor.submit(() -> {
             try {
-                List<String> modifiedLines = patch.applyTo(originalSourceLines);
-                
                 String fileName = mainClassName + ".java";
                 Path modifiedSourceFile = tempDir.resolve(fileName);
-                Files.write(modifiedSourceFile, modifiedLines);
+
+                // Schreibe den gepatchten Quelltext in die temporäre Datei
+                Files.writeString(modifiedSourceFile, patchedSource);
 
                 CompilationResult compileResult = compile(modifiedSourceFile.toFile(), testSourcePath);
-                
+
                 if (!compileResult.success) {
                     return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
                 }
 
                 TestExecutionResult testResult = runTests(compileResult.classPath);
-                
+
                 double fitness = calculateFitness(testResult.passingCount, testResult.failingCount);
                 boolean allPass = testResult.failingCount == 0 && testResult.totalCount > 0 && testResult.passingCount > 0;
 
@@ -138,7 +138,7 @@ public class FitnessEvaluator {
                 return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
             }
         });
-        
+
         try {
             return future.get(10, TimeUnit.SECONDS);
         } catch (TimeoutException e) {

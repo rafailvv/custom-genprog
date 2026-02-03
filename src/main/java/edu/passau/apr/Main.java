@@ -1,8 +1,18 @@
 package edu.passau.apr;
 
+import com.github.javaparser.Position;
+import com.github.javaparser.Range;
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.IfStmt;
+import com.github.javaparser.ast.stmt.Statement;
+import com.github.javaparser.printer.YamlPrinter;
 import edu.passau.apr.algorithm.GeneticAlgorithm;
 import edu.passau.apr.config.Config;
 import edu.passau.apr.evaluator.FitnessEvaluator;
+import edu.passau.apr.model.AstProgram;
 import edu.passau.apr.model.BenchmarkConfig;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.model.StatementWeight;
@@ -49,8 +59,64 @@ public class Main {
             List<StatementWeight> weights = BenchmarkLoader.loadFaultLocalization(
                 benchmarkConfig.getFaultLocalizationPath());
 
+            CompilationUnit cu = StaticJavaParser.parse("public class Calculator {\n" +
+                    "    public static int max(int a, int b) {\n" +
+                    "        if (a > b) {\n" +
+                    "            return a;\n" +
+                    "        } else {\n" +
+                    "            return b;\n" +
+                    "        }\n" +
+                    "    }\n" +
+                    "\n" +
+                    "    public static int sum(int[] array) {\n" +
+                    "        int total = 0;\n" +
+                    "        for (int i = 0; i < array.length; i++) {\n" +
+                    "            total += array[i];\n" +
+                    "        }\n" +
+                    "        return total;\n" +
+                    "    }\n" +
+                    "}\n");
+
+            AstProgram originalProgram = AstProgram.parse(Paths.get(benchmarkConfig.getBuggySourcePath()));
+            List<Statement> statements = cu.findAll(Statement.class);
+
+
+            cu.findAll(Statement.class).forEach(statement -> {
+                System.out.println("Statement (type=" + statement.getClass().getSimpleName() + ") "
+                        + "from line " + statement.getBegin().get().line +
+                        " to " + statement.getEnd().get().line + ": \n" + statement + "\n-------");
+            });
+
+            statements.forEach(statement -> {
+                var node = (Node) statement;
+                if (statement.isForStmt()) {
+                    var parent = (BlockStmt) node.getParentNode().orElseThrow();
+                    var stmts = parent.getStatements();
+
+                    var randomNode = StaticJavaParser.parseStatement("int x = 0;");
+                    randomNode.setRange(new Range(new Position(statement.getBegin().get().line, 1),
+                            new Position(statement.getBegin().get().line, 10)));
+
+                    stmts.addBefore(randomNode, statement);
+                }
+            });
+
+            System.out.println(cu);
+
+            //System.out.println(forNode[0]);
+            //System.out.println(originalProgram.getCompilationUnit().remove(forNode[0]));
+            cu.findAll(Statement.class).forEach(statement -> {
+                System.out.println("Statement (type=" + statement.getClass().getSimpleName() + ") "
+                        + "from line " + statement.getBegin().get().line +
+                        " to " + statement.getEnd().get().line + ": \n" + statement + "\n-------");
+            });
+
+            YamlPrinter printer = new YamlPrinter(true);
+            System.out.println(printer.output(originalProgram.getCompilationUnit()));
+            System.exit(0);
+
             Random random = new Random(config.getSeed());
-            WeightedPathSelector pathSelector = new WeightedPathSelector(weights, random);
+            WeightedPathSelector pathSelector = new WeightedPathSelector(weights, random, originalProgram);
             FitnessEvaluator fitnessEvaluator = new FitnessEvaluator(
                 benchmarkConfig.getBuggySourcePath(),
                 benchmarkConfig.getFixedSourcePath(),
@@ -62,8 +128,7 @@ public class Main {
             );
 
             PatchGenerator patchGenerator = new PatchGenerator(
-                random, pathSelector, sourceLines,
-                config.getMutationWeight()
+                random, config.getMutationWeight()
             );
 
             GeneticAlgorithm ga = new GeneticAlgorithm(
@@ -75,7 +140,7 @@ public class Main {
                 random,
                 patchGenerator,
                 fitnessEvaluator,
-                sourceLines
+                originalProgram
             );
 
             System.out.println("Starting genetic algorithm...");
@@ -191,15 +256,17 @@ public class Main {
     private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig,
                                        List<String> originalLines, Patch patch) {
         try {
-            List<String> patchedLines = patch.applyTo(originalLines);
+            // AST-basierte Anwendung: parse Original, Patch anwenden und als String speichern
+            AstProgram originalProgram = AstProgram.parse(Paths.get(benchmarkConfig.getBuggySourcePath()));
+            String patchedSource = String.valueOf(patch.applyTo(originalProgram.getCompilationUnit()));
 
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-            Path outputDir = Paths.get("out", Paths.get(benchmarkPath).getFileName().toString(), 
+            Path outputDir = Paths.get("out", Paths.get(benchmarkPath).getFileName().toString(),
                                        "patch_" + timestamp);
             Files.createDirectories(outputDir);
 
             Path patchedFile = outputDir.resolve(benchmarkConfig.getMainClassName() + ".java");
-            Files.write(patchedFile, patchedLines);
+            Files.writeString(patchedFile, patchedSource);
 
             System.out.println("Patched file saved to: " + patchedFile);
 
@@ -208,4 +275,3 @@ public class Main {
         }
     }
 }
-

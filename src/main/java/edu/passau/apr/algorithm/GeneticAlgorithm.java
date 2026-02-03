@@ -1,6 +1,8 @@
 package edu.passau.apr.algorithm;
 
+import com.github.javaparser.ast.CompilationUnit;
 import edu.passau.apr.evaluator.FitnessEvaluator;
+import edu.passau.apr.model.AstProgram;
 import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.operator.PatchGenerator;
@@ -25,7 +27,7 @@ public class GeneticAlgorithm {
     private final Random random;
     private final PatchGenerator patchGenerator;
     private final FitnessEvaluator fitnessEvaluator;
-    private final List<String> originalSourceLines;
+    private final AstProgram originalProgram;
 
     private List<Patch> population;
     private List<FitnessResult> fitnesses;
@@ -38,7 +40,7 @@ public class GeneticAlgorithm {
                            double mutationWeight, double crossoverRate,
                            Random random, PatchGenerator patchGenerator,
                            FitnessEvaluator fitnessEvaluator,
-                           List<String> originalSourceLines) {
+                           AstProgram originalProgram) {
         this.populationSize = populationSize;
         this.maxGenerations = maxGenerations;
         this.timeLimitMs = timeLimitMs;
@@ -47,7 +49,7 @@ public class GeneticAlgorithm {
         this.random = random;
         this.patchGenerator = patchGenerator;
         this.fitnessEvaluator = fitnessEvaluator;
-        this.originalSourceLines = originalSourceLines;
+        this.originalProgram = originalProgram;
     }
 
     /**
@@ -91,7 +93,7 @@ public class GeneticAlgorithm {
             }
 
             // mutate all patches in the new population
-            newPopulation.replaceAll(patchGenerator::mutate);
+            newPopulation.forEach(p -> p.doMutations(mutationWeight, random));
 
             population = newPopulation;
             evaluatePopulation();
@@ -166,8 +168,11 @@ public class GeneticAlgorithm {
         bestFitness = null;
         bestPatch = null;
 
+        CompilationUnit originalCu = originalProgram.getCompilationUnit();
+
         for (Patch patch : population) {
-            FitnessResult fitness = fitnessEvaluator.evaluate(patch, originalSourceLines);
+            CompilationUnit patched = patch.applyTo(originalCu);
+            FitnessResult fitness = fitnessEvaluator.evaluate(patch, patched.toString());
             fitnesses.add(fitness);
 
             if (bestFitness == null || fitness.fitness() > bestFitness.fitness()) {
@@ -201,7 +206,10 @@ public class GeneticAlgorithm {
             bestFitness != null ? bestFitness.passingTests() : 0,
             bestFitness != null ? bestFitness.failingTests() : 0
         );
-        System.out.flush();
+        System.out.println("Best Patch so far:");
+        System.out.println(bestPatch);
+        System.out.println(bestPatch.applyTo(originalProgram.getCompilationUnit()));
+        System.out.println("----------------------------------------");
     }
 
     public record AlgorithmResult(Patch bestPatch, FitnessResult bestFitness, int generations, long elapsedTimeMs) {
