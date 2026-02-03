@@ -34,12 +34,18 @@ public class Patch {
         this.nodeWeightMap = nodeWeightMap;
     }
 
-    public Patch(String source, List<Double> nodeWeights) throws IOException {
+    public Patch(String source, List<StatementWeight> nodeWeights) {
         this.nodeWeightMap = new HashMap<>();
         this.compilationUnit = StaticJavaParser.parse(source);
         this.compilationUnit.findAll(Statement.class).forEach(statement -> {
             int line = statement.getBegin().map(p -> p.line).orElse(-1);
-            double weight = (line >= 1 && line <= nodeWeights.size()) ? nodeWeights.get(line - 1) : 0d;
+            double weight = 0.0;
+            for (var sw : nodeWeights) {
+                if (sw.getLineNumber() == line) {
+                    weight = sw.getWeight();
+                    break;
+                }
+            }
             nodeWeightMap.put(statement, weight);
         });
     }
@@ -93,5 +99,9 @@ public class Patch {
         }
         int index = random.nextInt(statements.size());
         return new Pair<>(statements.get(index), index);
+    }
+
+    public CompilationUnit getCompilationUnit() {
+        return compilationUnit;
     }
 }

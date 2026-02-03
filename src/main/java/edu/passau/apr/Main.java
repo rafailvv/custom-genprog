@@ -1,24 +1,12 @@
 package edu.passau.apr;
 
-import com.github.javaparser.Position;
-import com.github.javaparser.Range;
-import com.github.javaparser.StaticJavaParser;
-import com.github.javaparser.ast.CompilationUnit;
-import com.github.javaparser.ast.Node;
-import com.github.javaparser.ast.stmt.BlockStmt;
-import com.github.javaparser.ast.stmt.IfStmt;
-import com.github.javaparser.ast.stmt.Statement;
-import com.github.javaparser.printer.YamlPrinter;
 import edu.passau.apr.algorithm.GeneticAlgorithm;
 import edu.passau.apr.config.Config;
 import edu.passau.apr.evaluator.FitnessEvaluator;
-import edu.passau.apr.model.AstProgram;
 import edu.passau.apr.model.BenchmarkConfig;
 import edu.passau.apr.model.Patch;
-import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.operator.PatchGenerator;
 import edu.passau.apr.util.BenchmarkLoader;
-import edu.passau.apr.util.WeightedPathSelector;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,7 +14,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Random;
 
 /**
@@ -54,70 +41,16 @@ public class Main {
             System.out.println("Time Limit: " + config.getTimeLimitSec() + " seconds");
             System.out.println();
 
-            BenchmarkConfig benchmarkConfig = BenchmarkLoader.loadConfig(config.getBenchmarkPath());
-            List<String> sourceLines = BenchmarkLoader.readSourceFile(benchmarkConfig.getBuggySourcePath());
-            List<StatementWeight> weights = BenchmarkLoader.loadFaultLocalization(
-                benchmarkConfig.getFaultLocalizationPath());
+            var random = new Random(config.getSeed());
 
-            CompilationUnit cu = StaticJavaParser.parse("public class Calculator {\n" +
-                    "    public static int max(int a, int b) {\n" +
-                    "        if (a > b) {\n" +
-                    "            return a;\n" +
-                    "        } else {\n" +
-                    "            return b;\n" +
-                    "        }\n" +
-                    "    }\n" +
-                    "\n" +
-                    "    public static int sum(int[] array) {\n" +
-                    "        int total = 0;\n" +
-                    "        for (int i = 0; i < array.length; i++) {\n" +
-                    "            total += array[i];\n" +
-                    "        }\n" +
-                    "        return total;\n" +
-                    "    }\n" +
-                    "}\n");
+            var benchmarkConfig = BenchmarkLoader.loadConfig(config.getBenchmarkPath());
+            var weights = BenchmarkLoader.loadFaultLocalization(benchmarkConfig.getFaultLocalizationPath());
 
-            AstProgram originalProgram = AstProgram.parse(Paths.get(benchmarkConfig.getBuggySourcePath()));
-            List<Statement> statements = cu.findAll(Statement.class);
+            var buggySourcePath = Paths.get(benchmarkConfig.getBuggySourcePath());
+            var buggySource = Files.readString(buggySourcePath);
+            var patchGenerator = new PatchGenerator(buggySource, weights, config.getMutationWeight(), random);
 
-
-            cu.findAll(Statement.class).forEach(statement -> {
-                System.out.println("Statement (type=" + statement.getClass().getSimpleName() + ") "
-                        + "from line " + statement.getBegin().get().line +
-                        " to " + statement.getEnd().get().line + ": \n" + statement + "\n-------");
-            });
-
-            statements.forEach(statement -> {
-                var node = (Node) statement;
-                if (statement.isForStmt()) {
-                    var parent = (BlockStmt) node.getParentNode().orElseThrow();
-                    var stmts = parent.getStatements();
-
-                    var randomNode = StaticJavaParser.parseStatement("int x = 0;");
-                    randomNode.setRange(new Range(new Position(statement.getBegin().get().line, 1),
-                            new Position(statement.getBegin().get().line, 10)));
-
-                    stmts.addBefore(randomNode, statement);
-                }
-            });
-
-            System.out.println(cu);
-
-            //System.out.println(forNode[0]);
-            //System.out.println(originalProgram.getCompilationUnit().remove(forNode[0]));
-            cu.findAll(Statement.class).forEach(statement -> {
-                System.out.println("Statement (type=" + statement.getClass().getSimpleName() + ") "
-                        + "from line " + statement.getBegin().get().line +
-                        " to " + statement.getEnd().get().line + ": \n" + statement + "\n-------");
-            });
-
-            YamlPrinter printer = new YamlPrinter(true);
-            System.out.println(printer.output(originalProgram.getCompilationUnit()));
-            System.exit(0);
-
-            Random random = new Random(config.getSeed());
-            WeightedPathSelector pathSelector = new WeightedPathSelector(weights, random, originalProgram);
-            FitnessEvaluator fitnessEvaluator = new FitnessEvaluator(
+            var fitnessEvaluator = new FitnessEvaluator(
                 benchmarkConfig.getBuggySourcePath(),
                 benchmarkConfig.getFixedSourcePath(),
                 benchmarkConfig.getTestSourcePath(),
@@ -127,11 +60,7 @@ public class Main {
                 benchmarkConfig.getMainClassName()
             );
 
-            PatchGenerator patchGenerator = new PatchGenerator(
-                random, config.getMutationWeight()
-            );
-
-            GeneticAlgorithm ga = new GeneticAlgorithm(
+            var ga = new GeneticAlgorithm(
                 config.getPopulationSize(),
                 config.getMaxGenerations(),
                 config.getTimeLimitSec() * 1_000L,
@@ -139,8 +68,7 @@ public class Main {
                 CROSS_OVER_RATE,
                 random,
                 patchGenerator,
-                fitnessEvaluator,
-                originalProgram
+                fitnessEvaluator
             );
 
             System.out.println("Starting genetic algorithm...");
@@ -156,7 +84,7 @@ public class Main {
                 System.out.println("Patch:");
                 System.out.println(result.bestPatch().toString());
                 
-                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.bestPatch());
+                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, result.bestPatch());
             } else {
                 System.out.println("No solution found within limits.");
                 if (result.bestFitness() != null) {
@@ -164,7 +92,7 @@ public class Main {
                     System.out.println("Best Patch:");
                     System.out.println(result.bestPatch().toString());
 
-                    savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.bestPatch());
+                    savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, result.bestPatch());
                 }
             }
 
@@ -253,12 +181,9 @@ public class Main {
         System.out.println(usage);
     }
 
-    private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig,
-                                       List<String> originalLines, Patch patch) {
+    private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig, Patch patch) {
         try {
-            // AST-basierte Anwendung: parse Original, Patch anwenden und als String speichern
-            AstProgram originalProgram = AstProgram.parse(Paths.get(benchmarkConfig.getBuggySourcePath()));
-            String patchedSource = String.valueOf(patch.applyTo(originalProgram.getCompilationUnit()));
+            String patchedSource = patch.getCompilationUnit().toString();
 
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             Path outputDir = Paths.get("out", Paths.get(benchmarkPath).getFileName().toString(),

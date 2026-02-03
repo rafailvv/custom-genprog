@@ -2,7 +2,6 @@ package edu.passau.apr.algorithm;
 
 import com.github.javaparser.ast.CompilationUnit;
 import edu.passau.apr.evaluator.FitnessEvaluator;
-import edu.passau.apr.model.AstProgram;
 import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.operator.PatchGenerator;
@@ -27,7 +26,6 @@ public class GeneticAlgorithm {
     private final Random random;
     private final PatchGenerator patchGenerator;
     private final FitnessEvaluator fitnessEvaluator;
-    private final AstProgram originalProgram;
 
     private List<Patch> population;
     private List<FitnessResult> fitnesses;
@@ -37,10 +35,9 @@ public class GeneticAlgorithm {
     private long startTime;
 
     public GeneticAlgorithm(int populationSize, int maxGenerations, long timeLimitMs,
-                           double mutationWeight, double crossoverRate,
-                           Random random, PatchGenerator patchGenerator,
-                           FitnessEvaluator fitnessEvaluator,
-                           AstProgram originalProgram) {
+                            double mutationWeight, double crossoverRate,
+                            Random random, PatchGenerator patchGenerator,
+                            FitnessEvaluator fitnessEvaluator) {
         this.populationSize = populationSize;
         this.maxGenerations = maxGenerations;
         this.timeLimitMs = timeLimitMs;
@@ -49,7 +46,6 @@ public class GeneticAlgorithm {
         this.random = random;
         this.patchGenerator = patchGenerator;
         this.fitnessEvaluator = fitnessEvaluator;
-        this.originalProgram = originalProgram;
     }
 
     /**
@@ -168,10 +164,8 @@ public class GeneticAlgorithm {
         bestFitness = null;
         bestPatch = null;
 
-        CompilationUnit originalCu = originalProgram.getCompilationUnit();
-
         for (Patch patch : population) {
-            CompilationUnit patched = patch.applyTo(originalCu);
+            CompilationUnit patched = patch.getCompilationUnit();
             FitnessResult fitness = fitnessEvaluator.evaluate(patch, patched.toString());
             fitnesses.add(fitness);
 
@@ -208,7 +202,7 @@ public class GeneticAlgorithm {
         );
         System.out.println("Best Patch so far:");
         System.out.println(bestPatch);
-        System.out.println(bestPatch.applyTo(originalProgram.getCompilationUnit()));
+        System.out.println(bestPatch.getCompilationUnit());
         System.out.println("----------------------------------------");
     }
 
