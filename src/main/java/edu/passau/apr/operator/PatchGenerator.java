@@ -12,23 +12,23 @@ import java.util.Random;
  * Generates random patches using genetic operators.
  */
 public class PatchGenerator {
+    private static final int DEFAULT_MAX_EDITS_PER_PATCH = 5;
+
     private final Random random;
     private final WeightedPathSelector pathSelector;
     private final List<String> sourceLines;
     private final double mutationWeight;
-    private final int maxEditsPerPatch;
 
     private final DeleteOperator deleteOp;
     private final InsertOperator insertOp;
     private final ReplaceOperator replaceOp;
 
     public PatchGenerator(Random random, WeightedPathSelector pathSelector, 
-                         List<String> sourceLines, double mutationWeight, int maxEditsPerPatch) {
+                         List<String> sourceLines, double mutationWeight) {
         this.random = random;
         this.pathSelector = pathSelector;
         this.sourceLines = sourceLines;
         this.mutationWeight = mutationWeight;
-        this.maxEditsPerPatch = maxEditsPerPatch;
 
         this.deleteOp = new DeleteOperator(random, pathSelector, sourceLines);
         this.insertOp = new InsertOperator(random, pathSelector, sourceLines);
@@ -40,7 +40,7 @@ public class PatchGenerator {
      */
     public Patch generateRandomPatch() {
         Patch patch = new Patch();
-        int numEdits = 1 + random.nextInt(maxEditsPerPatch);
+        int numEdits = 1 + random.nextInt(DEFAULT_MAX_EDITS_PER_PATCH);
 
         for (int i = 0; i < numEdits; i++) {
             Edit edit = generateRandomEdit();
@@ -58,25 +58,14 @@ public class PatchGenerator {
     public Patch mutate(Patch original) {
         Patch mutated = original.copy();
 
+        // TODO instead of one new edit, it should loop through all statements and
+        // mutate with probability mutationWeight * suspiciousness. See paper fig. 3.
+
         if (random.nextDouble() < mutationWeight) {
             Edit newEdit = generateRandomEdit();
             if (newEdit != null) {
                 mutated.addEdit(newEdit);
             }
-        }
-
-        if (!mutated.isEmpty() && random.nextDouble() < 0.3) {
-            int editCount = mutated.getEditCount();
-            if (editCount > 0) {
-                int indexToRemove = random.nextInt(editCount);
-                mutated.removeEdit(indexToRemove);
-            }
-        }
-
-        while (mutated.getEditCount() > maxEditsPerPatch) {
-            int editCount = mutated.getEditCount();
-            if (editCount == 0) break;
-            mutated.removeEdit(editCount - 1);
         }
 
         return mutated;

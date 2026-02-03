@@ -64,7 +64,7 @@ public class Main {
 
             PatchGenerator patchGenerator = new PatchGenerator(
                 random, pathSelector, sourceLines,
-                config.getMutationWeight(), 3
+                config.getMutationWeight()
             );
 
             GeneticAlgorithm ga = new GeneticAlgorithm(
