@@ -8,6 +8,8 @@ import java.util.Random;
 
 /**
  * Genetic operator that replaces a statement with a donor statement.
+ *
+ * TODO: According to the paper this should be called SWAP and exchange one statement with another.
  */
 public class ReplaceOperator extends GeneticOperator {
     public ReplaceOperator(Random random, WeightedPathSelector pathSelector, List<String> sourceLines) {
