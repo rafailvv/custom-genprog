@@ -50,8 +50,9 @@ public class Patch {
         int i = 0;
         for (Statement stmt : compilationUnit.findAll(Statement.class)) {
 
-            // skip block statements for insertions as parent might not be a block statement
-            // TODO how should we handle this properly?
+            // skip block statements as
+            // - insertions are not possible as the parent might not be a block statement
+            // - swaps might only be possible with other block statements
             if (stmt.isBlockStmt()) {
                 i++; continue;
             }
@@ -65,11 +66,13 @@ public class Patch {
                         edits.add(new Edit(DELETE, i, null));
                     }
                     case INSERT -> {
+                        System.out.println("Attempting insertion at statement " + stmt);
                         var donorStmt = getDonorStatement(random);
                         if (donorStmt != null) {
                             int _i = i;
                             stmt.getParentNode().map(n -> (BlockStmt) n).ifPresent(parent -> {
-                                parent.getStatements().addBefore(donorStmt.first(), stmt);
+                                var donorStmtClone = donorStmt.first().clone();
+                                parent.getStatements().addBefore(donorStmtClone, stmt);
                                 edits.add(new Edit(INSERT, _i, donorStmt.second()));
                             });
                         }
@@ -96,12 +99,14 @@ public class Patch {
 
 
     private Pair<Statement, Integer> getDonorStatement(Random random) {
-        List<Statement> statements = compilationUnit.findAll(Statement.class);
+        // do not use block statements as donors as they cannot be swapped with other statements, if they are part of e.g. an if statement
+        // it also helps to produce smaller patches
+        List<Statement> statements = compilationUnit.findAll(Statement.class).stream().filter(s -> !s.isBlockStmt()).toList();
         if (statements.isEmpty()) {
             return null;
         }
         int index = random.nextInt(statements.size());
-        var donorStmt = statements.get(index).clone();
+        var donorStmt = statements.get(index);
         return new Pair<>(donorStmt, index);
     }
 
