@@ -17,7 +17,7 @@ public record Edit(Type type, int statementIndex, Integer donorStatementIndex) {
 
     @Override
     public String toString() {
-        return String.format("%s at line %d: %s", type, statementIndex, donorStatementIndex != null ? donorStatementIndex : "");
+        return String.format("%s at statement %d: %s", type, statementIndex, donorStatementIndex != null ? donorStatementIndex : "");
     }
 }
 
