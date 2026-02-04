@@ -1,5 +1,3 @@
-package B05_WrongIndex;
-
 public class ArrayIndexUtil {
 
     public static int getFirstElement(int[] array) {

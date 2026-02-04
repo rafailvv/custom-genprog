@@ -1,5 +1,3 @@
-package B05_WrongIndex;
-
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
