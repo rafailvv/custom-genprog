@@ -5,6 +5,7 @@ import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.util.Pair;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -14,9 +15,9 @@ public class PatchGenerator {
     private final Random random;
     private final String source;
     private final double mutationWeight;
-    private final List<StatementWeight> weights;
+    private final Map<Integer, Double> weights;
 
-    public PatchGenerator(String source, List<StatementWeight> weights, double mutationWeight, Random random) {
+    public PatchGenerator(String source, Map<Integer, Double> weights, double mutationWeight, Random random) {
         this.random = random;
         this.source = source;
         this.mutationWeight = mutationWeight;

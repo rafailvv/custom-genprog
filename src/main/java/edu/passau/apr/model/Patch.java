@@ -1,5 +1,7 @@
 package edu.passau.apr.model;
 
+import com.github.javaparser.Position;
+import com.github.javaparser.Range;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.stmt.BlockStmt;
@@ -21,29 +23,20 @@ import static edu.passau.apr.model.Edit.Type.SWAP;
  * A patch is applied to the buggy source code to create a candidate fix.
  */
 public class Patch {
+    private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
+
     private final CompilationUnit compilationUnit; // cache of the patched compilation unit
-    private final Map<Statement, Double> statementSus; // map of suspicious values for nodes
+    private final Map<Integer, Double> suspiciousness; // map of suspicious values for nodes (cache for faster access)
     private final List<Edit> edits = new ArrayList<>(); // list of edits applied one after another
 
-    public Patch(CompilationUnit compilationUnit, Map<Statement, Double> statementSus) {
-        this.compilationUnit = compilationUnit.clone();
-        this.statementSus = statementSus;
+    public Patch(CompilationUnit cu, Map<Integer, Double> nodeWeights) {
+        this.compilationUnit = cu;
+        this.suspiciousness = nodeWeights;
     }
 
-    public Patch(String source, List<StatementWeight> nodeWeights) {
-        this.statementSus = new HashMap<>();
+    public Patch(String source, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = StaticJavaParser.parse(source);
-        this.compilationUnit.findAll(Statement.class).forEach(statement -> {
-            int line = statement.getBegin().map(p -> p.line).orElse(-1);
-            double weight = 0.0;
-            for (var sw : nodeWeights) {
-                if (sw.getLineNumber() == line) {
-                    weight = sw.getWeight();
-                    break;
-                }
-            }
-            statementSus.put(statement, weight);
-        });
+        this.suspiciousness = nodeWeights;
     }
 
     public void doMutations(double mutationRate, Random random) {
@@ -57,7 +50,12 @@ public class Patch {
                 i++; continue;
             }
 
-            Double weight = statementSus.getOrDefault(stmt, 0.1); // assume 0.1 for modified statements
+            // Get suspiciousness weight at the line number of the statement.
+            // For multiline statements, the first line is chosen as this should have the highest suspiciousness value and
+            // is definitely run.
+            var line = stmt.getBegin().map(p -> p.line).orElse(-1);
+            var weight = suspiciousness.getOrDefault(line, 0.1); // assume 0.1 for modified statements
+
             if (random.nextDouble() < mutationRate && random.nextDouble() < weight) {
                 var operation = choose(random, Edit.Type.values());
                 switch (operation) {
@@ -66,13 +64,16 @@ public class Patch {
                         edits.add(new Edit(DELETE, i, null));
                     }
                     case INSERT -> {
-                        System.out.println("Attempting insertion at statement " + stmt);
                         var donorStmt = getDonorStatement(random);
                         if (donorStmt != null) {
                             int _i = i;
                             stmt.getParentNode().map(n -> (BlockStmt) n).ifPresent(parent -> {
                                 var donorStmtClone = donorStmt.first().clone();
+                                // invalidate range as the suspiciousness value is unknown
+                                donorStmtClone.setRange(INVALID_RANGE);
+
                                 parent.getStatements().addBefore(donorStmtClone, stmt);
+
                                 edits.add(new Edit(INSERT, _i, donorStmt.second()));
                             });
                         }
@@ -80,8 +81,17 @@ public class Patch {
                     case SWAP -> {
                         var donorStmt = getDonorStatement(random);
                         if (donorStmt != null) {
-                            stmt.replace(donorStmt.first().clone());
-                            donorStmt.first().replace(stmt.clone());
+                            var a = donorStmt.first().clone();
+                            var b = stmt.clone();
+
+                            // Invalidate ranges so we do not find any suspiciousness values for them.
+                            // This is required as cloned and modified statements still equal each other, so
+                            // we need to query the suspiciousness values by line numbers each time.
+                            a.setRange(INVALID_RANGE);
+                            b.setRange(INVALID_RANGE);
+
+                            stmt.replace(a);
+                            donorStmt.first().replace(b);
                             edits.add(new Edit(SWAP, i, donorStmt.second()));
                         }
                     }

@@ -10,7 +10,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Utility class for loading benchmark configuration and fault localization data.
@@ -45,7 +48,7 @@ public class BenchmarkLoader {
      * Loads fault localization weights from JSON file.
      * Expected format: [{"lineNumber": 5, "weight": 1.0}, ...]
      */
-    public static List<StatementWeight> loadFaultLocalization(String filePath) throws IOException {
+    public static Map<Integer, Double> loadFaultLocalization(String filePath) throws IOException {
         Path path = Paths.get(filePath);
         if (!Files.exists(path)) {
             throw new IOException("Fault localization file not found: " + filePath);
@@ -53,11 +56,9 @@ public class BenchmarkLoader {
 
         try (FileReader reader = new FileReader(path.toFile())) {
             StatementWeight[] weights = gson.fromJson(reader, StatementWeight[].class);
-            List<StatementWeight> result = new ArrayList<>();
-            for (StatementWeight weight : weights) {
-                result.add(weight);
-            }
-            return result;
+            Map<Integer, Double> weightMap = new HashMap<>();
+            Arrays.asList(weights).forEach(sw -> weightMap.put(sw.getLineNumber(), sw.getWeight()));
+            return weightMap;
         }
     }
 
