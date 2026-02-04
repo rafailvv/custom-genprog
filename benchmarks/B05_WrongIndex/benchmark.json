@@ -1,0 +1,10 @@
+{
+  "name": "B05_WrongIndex",
+  "buggySourcePath": "buggy/ArrayIndexUtil.java.java",
+  "fixedSourcePath": "fixed/ArrayIndexUtil.java.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "ArrayIndexUtil",
+  "testClassNames": ["ArrayIndexUtilTest"]
+}
+
