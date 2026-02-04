@@ -101,7 +101,8 @@ public class Patch {
             return null;
         }
         int index = random.nextInt(statements.size());
-        return new Pair<>(statements.get(index), index);
+        var donorStmt = statements.get(index).clone();
+        return new Pair<>(donorStmt, index);
     }
 
     public CompilationUnit getCompilationUnit() {
