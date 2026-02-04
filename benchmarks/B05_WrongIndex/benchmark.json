@@ -1,7 +1,7 @@
 {
   "name": "B05_WrongIndex",
-  "buggySourcePath": "buggy/ArrayIndexUtil.java.java",
-  "fixedSourcePath": "fixed/ArrayIndexUtil.java.java",
+  "buggySourcePath": "buggy/ArrayIndexUtil.java",
+  "fixedSourcePath": "fixed/ArrayIndexUtil.java",
   "testSourcePath": "tests",
   "faultLocalizationPath": "fault-localization.json",
   "mainClassName": "ArrayIndexUtil",
