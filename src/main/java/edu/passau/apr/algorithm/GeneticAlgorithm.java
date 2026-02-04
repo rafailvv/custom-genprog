@@ -77,6 +77,7 @@ public class GeneticAlgorithm {
 
             // crossover rate is 1 -> every surviving patch undergoes crossover (but only parent in one crossover generation)
             var pairs = pairUp(select(viablePatches, viFit, populationSize / 2));
+            System.out.println("Selected " + pairs.size() + " pairs for crossover.");
             for (Pair<Patch, Patch> parents : pairs) {
                 Pair<Patch, Patch> offspring = patchGenerator.crossover(parents.first(), parents.second());
 
@@ -90,6 +91,8 @@ public class GeneticAlgorithm {
 
             // mutate all patches in the new population
             newPopulation.forEach(p -> p.doMutations(mutationWeight, random));
+
+            System.out.println("After reproduction and mutation, population size: " + newPopulation.size());
 
             population = newPopulation;
             evaluatePopulation();
@@ -165,9 +168,14 @@ public class GeneticAlgorithm {
         bestPatch = null;
 
         for (Patch patch : population) {
-            CompilationUnit patched = patch.getCompilationUnit();
-            FitnessResult fitness = fitnessEvaluator.evaluate(patch, patched.toString());
+            System.out.println("__");
+            System.out.println("Evaluating Patch:");
+            System.out.println(patch);
+            String patchSrc = patch.getCompilationUnit().toString();
+            System.out.println(patchSrc);
+            FitnessResult fitness = fitnessEvaluator.evaluate(patch, patchSrc);
             fitnesses.add(fitness);
+            System.out.println("Fitness: " + fitness);
 
             if (bestFitness == null || fitness.fitness() > bestFitness.fitness()) {
                 bestFitness = fitness;
