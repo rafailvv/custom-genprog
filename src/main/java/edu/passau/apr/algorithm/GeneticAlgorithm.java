@@ -129,7 +129,7 @@ public class GeneticAlgorithm {
         List<FitnessResult> selectedFs = new ArrayList<>();
 
         for (int i = 0; i < viablePatches.size(); i++) {
-            if (selectedPatches.size() <= selectionSize) {
+            if (selectedPatches.size() < selectionSize) {
                 selectedPatches.add(viablePatches.get(i));
                 selectedFs.add(fitnesses.get(i));
             } else {
