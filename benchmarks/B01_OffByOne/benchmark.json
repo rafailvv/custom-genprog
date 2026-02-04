@@ -1,10 +1,10 @@
 {
   "name": "B01_OffByOne",
-  "buggySourcePath": "buggy/Calculator.java",
-  "fixedSourcePath": "fixed/Calculator.java",
+  "buggySourcePath": "buggy/MathUtils.java",
+  "fixedSourcePath": "fixed/MathUtils.java",
   "testSourcePath": "tests",
   "faultLocalizationPath": "fault-localization.json",
-  "mainClassName": "Calculator",
-  "testClassNames": ["CalculatorTest"]
+  "mainClassName": "MathUtils",
+  "testClassNames": ["MathUtilsTest"]
 }
 
