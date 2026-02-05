@@ -1,0 +1,10 @@
+{
+  "name": "B03_MissingStatement",
+  "buggySourcePath": "buggy/ListStreamUtils.java",
+  "fixedSourcePath": "fixed/ListStreamUtils.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "ListStreamUtils",
+  "testClassNames": ["ListStreamUtilsTest"]
+}
+

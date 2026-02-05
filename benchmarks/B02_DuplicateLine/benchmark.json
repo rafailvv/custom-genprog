@@ -1,0 +1,10 @@
+{
+  "name": "B02_DuplicateLine",
+  "buggySourcePath": "buggy/ArrayUtils.java",
+  "fixedSourcePath": "fixed/ArrayUtils.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "ArrayUtils",
+  "testClassNames": ["ArrayIndexUtilTest"]
+}
+

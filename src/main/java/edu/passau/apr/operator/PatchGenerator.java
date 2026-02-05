@@ -1,5 +1,6 @@
 package edu.passau.apr.operator;
 
+import com.github.javaparser.ast.stmt.Statement;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.util.Pair;
@@ -37,6 +38,10 @@ public class PatchGenerator {
      * Performs crossover between two parent patches.
      */
     public Pair<Patch, Patch> crossover(Patch p, Patch q) {
+        p.getCompilationUnit().findAll(Statement.class).forEach(stmt -> {
+            System.out.println("Statement: " + stmt.getBegin().get().line + " Weight: " + weights.get(stmt.getBegin().get().line));
+        });
+        System.exit(0);
         Patch c = new Patch(source, weights);
         Patch d = new Patch(source, weights);
 
