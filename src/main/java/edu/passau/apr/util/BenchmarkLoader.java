@@ -61,21 +61,5 @@ public class BenchmarkLoader {
             return weightMap;
         }
     }
-
-    /**
-     * Reads source code file into a list of lines.
-     */
-    public static List<String> readSourceFile(String filePath) throws IOException {
-        Path path = Paths.get(filePath);
-        return Files.readAllLines(path);
-    }
-
-    /**
-     * Writes source code lines to a file.
-     */
-    public static void writeSourceFile(String filePath, List<String> lines) throws IOException {
-        Path path = Paths.get(filePath);
-        Files.write(path, lines);
-    }
 }
 

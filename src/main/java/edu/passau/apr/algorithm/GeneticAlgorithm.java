@@ -1,6 +1,5 @@
 package edu.passau.apr.algorithm;
 
-import com.github.javaparser.ast.CompilationUnit;
 import edu.passau.apr.evaluator.FitnessEvaluator;
 import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
@@ -173,7 +172,7 @@ public class GeneticAlgorithm {
             System.out.println(patch);
             String patchSrc = patch.getCompilationUnit().toString();
             System.out.println(patchSrc);
-            FitnessResult fitness = fitnessEvaluator.evaluate(patch, patchSrc);
+            FitnessResult fitness = fitnessEvaluator.evaluate(patchSrc);
             fitnesses.add(fitness);
             System.out.println("Fitness: " + fitness);
 

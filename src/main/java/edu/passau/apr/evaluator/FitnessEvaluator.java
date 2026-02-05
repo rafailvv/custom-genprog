@@ -1,8 +1,12 @@
 package edu.passau.apr.evaluator;
 
 import edu.passau.apr.model.FitnessResult;
-import edu.passau.apr.model.Patch;
-import org.junit.platform.engine.TestExecutionResult;
+import org.junit.platform.engine.discovery.DiscoverySelectors;
+import org.junit.platform.launcher.Launcher;
+import org.junit.platform.launcher.LauncherDiscoveryRequest;
+import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
+import org.junit.platform.launcher.core.LauncherFactory;
+import org.junit.platform.launcher.listeners.SummaryGeneratingListener;
 
 import javax.tools.JavaCompiler;
 import javax.tools.StandardJavaFileManager;
@@ -10,6 +14,7 @@ import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -104,16 +109,14 @@ public class FitnessEvaluator {
     /**
      * Applies a patch to the source code and evaluates its fitness.
      */
-    public FitnessResult evaluate(Patch patch, String patchedSource) {
+    public FitnessResult evaluate(String patchedSource) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<FitnessResult> future = executor.submit(() -> {
             try {
                 String fileName = mainClassName + ".java";
                 Path modifiedSourceFile = tempDir.resolve(fileName);
 
-                // Schreibe den gepatchten Quelltext in die temporäre Datei
                 Files.writeString(modifiedSourceFile, patchedSource);
-
                 CompilationResult compileResult = compile(modifiedSourceFile.toFile(), testSourcePath);
 
                 if (!compileResult.success) {
