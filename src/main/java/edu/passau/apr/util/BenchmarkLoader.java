@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Utility class for loading benchmark configuration and fault localization data.
@@ -39,9 +40,41 @@ public class BenchmarkLoader {
             config.setFixedSourcePath(basePath.resolve(config.getFixedSourcePath()).toString());
             config.setTestSourcePath(basePath.resolve(config.getTestSourcePath()).toString());
             config.setFaultLocalizationPath(basePath.resolve(config.getFaultLocalizationPath()).toString());
+
+            List<String> discoveredTests = discoverTestClassNames(config.getTestSourcePath());
+            if (!discoveredTests.isEmpty()) {
+                config.setTestClassNames(discoveredTests);
+            }
             
             return config;
         }
+    }
+
+    private static List<String> discoverTestClassNames(String testSourcePath) throws IOException {
+        Path testPath = Paths.get(testSourcePath);
+        if (!Files.exists(testPath)) {
+            return List.of();
+        }
+
+        if (Files.isRegularFile(testPath)) {
+            return List.of(classNameFromFile(testPath));
+        }
+
+        List<String> classNames = new ArrayList<>();
+        try (Stream<Path> paths = Files.walk(testPath)) {
+            paths.filter(Files::isRegularFile)
+                .filter(path -> path.getFileName().toString().endsWith("Test.java"))
+                .map(BenchmarkLoader::classNameFromFile)
+                .sorted()
+                .forEach(classNames::add);
+        }
+        return classNames;
+    }
+
+    private static String classNameFromFile(Path filePath) {
+        String fileName = filePath.getFileName().toString();
+        int extensionIndex = fileName.lastIndexOf(".java");
+        return extensionIndex > 0 ? fileName.substring(0, extensionIndex) : fileName;
     }
 
     /**
@@ -62,4 +95,3 @@ public class BenchmarkLoader {
         }
     }
 }
-

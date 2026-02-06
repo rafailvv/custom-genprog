@@ -1,22 +1,31 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Quick test script for APR tool
-# Tests all benchmarks with short parameters
+# Quick benchmark sweep for the APR tool.
+# Usage: ./test_quick.sh [seed] [maxGenerations] [timeLimitSec]
 
-echo "=== Quick Test of APR Tool ==="
-echo ""
+SEED="${1:-42}"
+MAX_GENERATIONS="${2:-80}"
+TIME_LIMIT_SEC="${3:-120}"
 
-BENCHMARKS=("B01_OffByOne" "B02_WrongOperator" "B03_WrongCondition" "B04_MissingStatement" "B05_WrongVariable")
+BENCHMARKS=(
+  "B01_OffByOne"
+  "B02_DuplicateLine"
+  "B03_MissingStatement"
+  "B04_WrongPredicates"
+  "B05_WrongIndex"
+)
+
+echo "=== Quick APR Benchmark Sweep ==="
+echo "Seed: $SEED | MaxGenerations: $MAX_GENERATIONS | TimeLimitSec: $TIME_LIMIT_SEC"
+echo
 
 for bench in "${BENCHMARKS[@]}"; do
-    echo "Testing $bench..."
-    echo "----------------------------------------"
-    
-    ./gradlew run --args="--benchmark benchmarks/$bench --seed 42 --maxGenerations 5 --timeLimitSec 15" --no-daemon 2>&1 | \
-        grep -E "SUCCESS|No solution|Generation [0-9]+:|Results|Best fitness" | head -5
-    
-    echo ""
-    sleep 1
+  echo "===== $bench ====="
+  ./gradlew run \
+    --args="--benchmark benchmarks/$bench --seed $SEED --maxGenerations $MAX_GENERATIONS --timeLimitSec $TIME_LIMIT_SEC" \
+    --no-daemon 2>/dev/null \
+    | grep -E "Generation [0-9]+:|=== Results ===|Generations:|Time:|SUCCESS:|No solution|Best fitness:|Patched file saved to" || true
+  echo
 done
 
-echo "=== Test Complete ==="
+echo "=== Sweep Complete ==="

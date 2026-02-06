@@ -32,6 +32,9 @@ public class FitnessEvaluator {
 
     private record CompilationResult(boolean success, String classPath) {}
     private record TestExecutionResult(int passingCount, int failingCount, int totalCount) {}
+    private static final int EVALUATION_TIMEOUT_SEC = 4;
+    private static final int COMPILATION_TIMEOUT_SEC = 2;
+    private static final int TEST_TIMEOUT_SEC = 1;
 
     private final String buggySourcePath;
     private final String fixedSourcePath;
@@ -110,7 +113,7 @@ public class FitnessEvaluator {
      * Applies a patch to the source code and evaluates its fitness.
      */
     public FitnessResult evaluate(String patchedSource) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ExecutorService executor = newDaemonSingleThreadExecutor("apr-eval");
         Future<FitnessResult> future = executor.submit(() -> {
             try {
                 String fileName = mainClassName + ".java";
@@ -143,7 +146,7 @@ public class FitnessEvaluator {
         });
 
         try {
-            return future.get(10, TimeUnit.SECONDS);
+            return future.get(EVALUATION_TIMEOUT_SEC, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
             return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
@@ -175,12 +178,12 @@ public class FitnessEvaluator {
                 fileManager.getJavaFileObjectsFromFiles(sourceFiles)
             );
 
-            ExecutorService executor = Executors.newSingleThreadExecutor();
+            ExecutorService executor = newDaemonSingleThreadExecutor("apr-compile");
             Future<Boolean> future = executor.submit(sourceTask);
             
             boolean sourceSuccess = false;
             try {
-                sourceSuccess = future.get(3, TimeUnit.SECONDS);
+                sourceSuccess = future.get(COMPILATION_TIMEOUT_SEC, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 future.cancel(true);
             } catch (Exception ignored) {
@@ -280,9 +283,13 @@ public class FitnessEvaluator {
                         if (hasTestAnnotation) {
                             totalCount++;
                             try {
-                                Object testInstance = testClass.getDeclaredConstructor().newInstance();
+                                java.lang.reflect.Constructor<?> constructor = testClass.getDeclaredConstructor();
+                                constructor.setAccessible(true);
+                                Object testInstance = constructor.newInstance();
+
+                                method.setAccessible(true);
                                 
-                                ExecutorService executor = Executors.newSingleThreadExecutor();
+                                ExecutorService executor = newDaemonSingleThreadExecutor("apr-test");
                                 Future<?> future = executor.submit(() -> {
                                     try {
                                         method.invoke(testInstance);
@@ -292,7 +299,7 @@ public class FitnessEvaluator {
                                 });
                                 
                                 try {
-                                    future.get(5, TimeUnit.SECONDS);
+                                    future.get(TEST_TIMEOUT_SEC, TimeUnit.SECONDS);
                                     passingCount++;
                                 } catch (TimeoutException e) {
                                     future.cancel(true);
@@ -328,6 +335,15 @@ public class FitnessEvaluator {
         return positiveTestWeight * passingTests - negativeTestWeight * failingTests;
     }
 
+    private ExecutorService newDaemonSingleThreadExecutor(String namePrefix) {
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(runnable, namePrefix + "-" + System.nanoTime());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return Executors.newSingleThreadExecutor(threadFactory);
+    }
+
 
     public void cleanup() {
         try {
@@ -343,4 +359,3 @@ public class FitnessEvaluator {
         }
     }
 }
-

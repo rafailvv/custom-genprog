@@ -4,18 +4,21 @@ import com.github.javaparser.Position;
 import com.github.javaparser.Range;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.expr.BinaryExpr;
+import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.Statement;
-import edu.passau.apr.util.Pair;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
 import static edu.passau.apr.model.Edit.Type.DELETE;
 import static edu.passau.apr.model.Edit.Type.INSERT;
+import static edu.passau.apr.model.Edit.Type.MUTATE_BINARY_OPERATOR;
+import static edu.passau.apr.model.Edit.Type.REPLACE_EXPR;
 import static edu.passau.apr.model.Edit.Type.SWAP;
 
 /**
@@ -24,10 +27,16 @@ import static edu.passau.apr.model.Edit.Type.SWAP;
  */
 public class Patch {
     private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
+    private static final int MAX_EDITS_PER_PATCH = 3;
+    private static final int MAX_MUTATION_RETRIES = 24;
+    private static final int MAX_EDITS_PER_MUTATION = 3;
+    private static final double TARGET_EXPLORATION_PROBABILITY = 0.20;
+    private static final double UNKNOWN_SUSPICIOUSNESS = 0.01;
+    private static final double MIN_SELECTION_WEIGHT = 0.01;
 
-    private final CompilationUnit compilationUnit; // cache of the patched compilation unit
-    private final Map<Integer, Double> suspiciousness; // map of suspicious values for nodes (cache for faster access)
-    private final List<Edit> edits = new ArrayList<>(); // list of edits applied one after another
+    private final CompilationUnit compilationUnit;
+    private final Map<Integer, Double> suspiciousness;
+    private final List<Edit> edits = new ArrayList<>();
 
     public Patch(CompilationUnit cu, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = cu;
@@ -40,84 +49,537 @@ public class Patch {
     }
 
     public void doMutations(double mutationRate, Random random) {
-        int i = 0;
-        for (Statement stmt : compilationUnit.findAll(Statement.class)) {
+        if (edits.size() >= MAX_EDITS_PER_PATCH) {
+            return;
+        }
 
-            // skip block statements as
-            // - insertions are not possible as the parent might not be a block statement
-            // - swaps might only be possible with other block statements
-            if (stmt.isBlockStmt()) {
-                i++; continue;
+        int mutationBudget = Math.min(
+            MAX_EDITS_PER_PATCH - edits.size(),
+            determineMutationBudget(mutationRate, random)
+        );
+
+        int applied = 0;
+        int retries = 0;
+        while (applied < mutationBudget && retries < MAX_MUTATION_RETRIES) {
+            retries++;
+            Integer targetStatementIndex = selectTargetStatementIndex(random);
+            if (targetStatementIndex == null) {
+                return;
             }
 
-            // Get suspiciousness weight at the line number of the statement.
-            // For multiline statements, the first line is chosen as this should have the highest suspiciousness value and
-            // is definitely run.
-            var line = stmt.getBegin().map(p -> p.line).orElse(-1);
-            var weight = suspiciousness.getOrDefault(line, 0.1); // assume 0.1 for modified statements
-
-            if (random.nextDouble() < mutationRate && random.nextDouble() < weight) {
-                var operation = choose(random, Edit.Type.values());
-                switch (operation) {
-                    case DELETE -> {
-                        stmt.remove();
-                        edits.add(new Edit(DELETE, i, null));
-                    }
-                    case INSERT -> {
-                        var donorStmt = getDonorStatement(random);
-                        if (donorStmt != null) {
-                            int _i = i;
-                            stmt.getParentNode().map(n -> (BlockStmt) n).ifPresent(parent -> {
-                                var donorStmtClone = donorStmt.first().clone();
-                                // invalidate range as the suspiciousness value is unknown
-                                donorStmtClone.setRange(INVALID_RANGE);
-
-                                parent.getStatements().addBefore(donorStmtClone, stmt);
-
-                                edits.add(new Edit(INSERT, _i, donorStmt.second()));
-                            });
-                        }
-                    }
-                    case SWAP -> {
-                        var donorStmt = getDonorStatement(random);
-                        if (donorStmt != null) {
-                            var a = donorStmt.first().clone();
-                            var b = stmt.clone();
-
-                            // Invalidate ranges so we do not find any suspiciousness values for them.
-                            // This is required as cloned and modified statements still equal each other, so
-                            // we need to query the suspiciousness values by line numbers each time.
-                            a.setRange(INVALID_RANGE);
-                            b.setRange(INVALID_RANGE);
-
-                            stmt.replace(a);
-                            donorStmt.first().replace(b);
-                            edits.add(new Edit(SWAP, i, donorStmt.second()));
-                        }
-                    }
-                }
+            Edit edit = createRandomEdit(targetStatementIndex, random);
+            if (edit != null && applyEdit(edit)) {
+                applied++;
             }
-
-            i++;
         }
     }
 
-    private Edit.Type choose(Random random, Edit.Type[] values) {
-        int index = random.nextInt(values.length);
-        return values[index];
+    public boolean applyEdit(Edit edit) {
+        if (edits.size() >= MAX_EDITS_PER_PATCH) {
+            return false;
+        }
+
+        return switch (edit.type()) {
+            case DELETE -> applyDelete(edit);
+            case INSERT -> applyInsert(edit);
+            case SWAP -> applySwap(edit);
+            case REPLACE_EXPR -> applyReplaceExpression(edit);
+            case MUTATE_BINARY_OPERATOR -> applyBinaryOperatorMutation(edit);
+        };
     }
 
+    public void applyEdits(List<Edit> candidateEdits) {
+        for (Edit edit : candidateEdits) {
+            applyEdit(edit);
+        }
+    }
 
-    private Pair<Statement, Integer> getDonorStatement(Random random) {
-        // do not use block statements as donors as they cannot be swapped with other statements, if they are part of e.g. an if statement
-        // it also helps to produce smaller patches
-        List<Statement> statements = compilationUnit.findAll(Statement.class).stream().filter(s -> !s.isBlockStmt()).toList();
+    public List<Edit> getEdits() {
+        return List.copyOf(edits);
+    }
+
+    public Patch copy() {
+        Patch patchCopy = new Patch(compilationUnit.clone(), suspiciousness);
+        patchCopy.edits.addAll(edits);
+        return patchCopy;
+    }
+
+    private int determineMutationBudget(double mutationRate, Random random) {
+        int budget = 1;
+        double boostedMutationRate = Math.min(0.85, Math.max(0.0, mutationRate * 5.0));
+        while (budget < MAX_EDITS_PER_MUTATION && random.nextDouble() < boostedMutationRate) {
+            budget++;
+        }
+        return budget;
+    }
+
+    private Edit createRandomEdit(int targetStatementIndex, Random random) {
+        Edit.Type operation = chooseMutationOperation(random);
+
+        return switch (operation) {
+            case DELETE -> new Edit(DELETE, targetStatementIndex, null);
+            case INSERT, SWAP -> {
+                Integer donorStatementIndex = selectDonorStatementIndex(targetStatementIndex, operation, random);
+                if (donorStatementIndex == null) {
+                    yield null;
+                }
+                yield new Edit(operation, targetStatementIndex, donorStatementIndex);
+            }
+            case REPLACE_EXPR -> createReplaceExpressionEdit(targetStatementIndex, random);
+            case MUTATE_BINARY_OPERATOR -> createBinaryOperatorMutationEdit(targetStatementIndex, random);
+        };
+    }
+
+    private Edit createBinaryOperatorMutationEdit(int targetStatementIndex, Random random) {
+        Statement targetStatement = getMutableStatementAt(targetStatementIndex);
+        if (targetStatement == null) {
+            return null;
+        }
+
+        List<Expression> targetExpressions = getReplaceableExpressions(targetStatement);
+        List<Integer> candidateBinaryIndices = new ArrayList<>();
+        for (int i = 0; i < targetExpressions.size(); i++) {
+            Expression expression = targetExpressions.get(i);
+            if (expression.isBinaryExpr() && !candidateOperators(expression.asBinaryExpr().getOperator()).isEmpty()) {
+                candidateBinaryIndices.add(i);
+            }
+        }
+        if (candidateBinaryIndices.isEmpty()) {
+            return null;
+        }
+
+        int targetExpressionIndex = candidateBinaryIndices.get(random.nextInt(candidateBinaryIndices.size()));
+        BinaryExpr targetBinary = targetExpressions.get(targetExpressionIndex).asBinaryExpr();
+        List<BinaryExpr.Operator> operators = candidateOperators(targetBinary.getOperator());
+        if (operators.isEmpty()) {
+            return null;
+        }
+
+        BinaryExpr.Operator newOperator = operators.get(random.nextInt(operators.size()));
+        return new Edit(
+            MUTATE_BINARY_OPERATOR,
+            targetStatementIndex,
+            null,
+            targetExpressionIndex,
+            binaryOperatorCode(newOperator)
+        );
+    }
+
+    private Edit createReplaceExpressionEdit(int targetStatementIndex, Random random) {
+        Integer donorStatementIndex = selectDonorStatementIndex(targetStatementIndex, REPLACE_EXPR, random);
+        if (donorStatementIndex == null) {
+            return null;
+        }
+
+        Statement targetStatement = getMutableStatementAt(targetStatementIndex);
+        Statement donorStatement = getMutableStatementAt(donorStatementIndex);
+        if (targetStatement == null || donorStatement == null) {
+            return null;
+        }
+
+        List<Expression> targetExpressions = getReplaceableExpressions(targetStatement);
+        List<Expression> donorExpressions = getReplaceableExpressions(donorStatement);
+        if (targetExpressions.isEmpty() || donorExpressions.isEmpty()) {
+            return null;
+        }
+
+        Integer targetExprIndex = selectExpressionIndex(targetExpressions, random, true);
+        Integer donorExprIndex = selectExpressionIndex(donorExpressions, random, false);
+        if (targetExprIndex == null || donorExprIndex == null) {
+            return null;
+        }
+
+        if (targetStatementIndex == donorStatementIndex && targetExpressions.size() < 2) {
+            return null;
+        }
+
+        if (targetStatementIndex == donorStatementIndex && targetExprIndex.equals(donorExprIndex)) {
+            donorExprIndex = pickDifferentExpressionIndex(donorExpressions.size(), targetExprIndex, random);
+            if (donorExprIndex == null) {
+                return null;
+            }
+        }
+
+        return new Edit(REPLACE_EXPR, targetStatementIndex, donorStatementIndex, targetExprIndex, donorExprIndex);
+    }
+
+    private Edit.Type chooseMutationOperation(Random random) {
+        double roll = random.nextDouble();
+        if (roll < 0.10) {
+            return DELETE;
+        }
+        if (roll < 0.20) {
+            return INSERT;
+        }
+        if (roll < 0.30) {
+            return SWAP;
+        }
+        if (roll < 0.70) {
+            return REPLACE_EXPR;
+        }
+        return MUTATE_BINARY_OPERATOR;
+    }
+
+    private boolean applyDelete(Edit edit) {
+        Statement target = getMutableStatementAt(edit.statementIndex());
+        if (target == null) {
+            return false;
+        }
+        target.remove();
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applyInsert(Edit edit) {
+        Integer donorIndex = edit.donorStatementIndex();
+        if (donorIndex == null) {
+            return false;
+        }
+
+        Statement target = getMutableStatementAt(edit.statementIndex());
+        Statement donor = getMutableStatementAt(donorIndex);
+        if (target == null || donor == null) {
+            return false;
+        }
+
+        if (!(target.getParentNode().orElse(null) instanceof BlockStmt parent)) {
+            return false;
+        }
+
+        Statement donorClone = donor.clone();
+        donorClone.setRange(INVALID_RANGE);
+        parent.getStatements().addBefore(donorClone, target);
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applySwap(Edit edit) {
+        Integer donorIndex = edit.donorStatementIndex();
+        if (donorIndex == null || donorIndex == edit.statementIndex()) {
+            return false;
+        }
+
+        Statement target = getMutableStatementAt(edit.statementIndex());
+        Statement donor = getMutableStatementAt(donorIndex);
+        if (target == null || donor == null || target == donor) {
+            return false;
+        }
+
+        if (target.isAncestorOf(donor) || donor.isAncestorOf(target)) {
+            return false;
+        }
+        if (!target.getClass().equals(donor.getClass())) {
+            return false;
+        }
+
+        Statement donorClone = donor.clone();
+        Statement targetClone = target.clone();
+        invalidateRanges(donorClone);
+        invalidateRanges(targetClone);
+
+        target.replace(donorClone);
+        donor.replace(targetClone);
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applyReplaceExpression(Edit edit) {
+        Integer donorStatementIndex = edit.donorStatementIndex();
+        Integer targetExpressionIndex = edit.targetExpressionIndex();
+        Integer donorExpressionIndex = edit.donorExpressionIndex();
+
+        if (donorStatementIndex == null || targetExpressionIndex == null || donorExpressionIndex == null) {
+            return false;
+        }
+
+        Statement targetStatement = getMutableStatementAt(edit.statementIndex());
+        Statement donorStatement = getMutableStatementAt(donorStatementIndex);
+        if (targetStatement == null || donorStatement == null) {
+            return false;
+        }
+
+        List<Expression> targetExpressions = getReplaceableExpressions(targetStatement);
+        List<Expression> donorExpressions = getReplaceableExpressions(donorStatement);
+        if (targetExpressionIndex < 0 || targetExpressionIndex >= targetExpressions.size()) {
+            return false;
+        }
+        if (donorExpressionIndex < 0 || donorExpressionIndex >= donorExpressions.size()) {
+            return false;
+        }
+
+        Expression targetExpression = targetExpressions.get(targetExpressionIndex);
+        Expression donorExpression = donorExpressions.get(donorExpressionIndex);
+        if (targetExpression == donorExpression) {
+            return false;
+        }
+        if (edit.statementIndex() == donorStatementIndex && targetExpressionIndex.equals(donorExpressionIndex)) {
+            return false;
+        }
+
+        Expression donorClone = donorExpression.clone();
+        invalidateRanges(donorClone);
+        targetExpression.replace(donorClone);
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applyBinaryOperatorMutation(Edit edit) {
+        Integer targetExpressionIndex = edit.targetExpressionIndex();
+        Integer operatorCode = edit.donorExpressionIndex();
+        if (targetExpressionIndex == null || operatorCode == null) {
+            return false;
+        }
+
+        Statement targetStatement = getMutableStatementAt(edit.statementIndex());
+        if (targetStatement == null) {
+            return false;
+        }
+
+        List<Expression> targetExpressions = getReplaceableExpressions(targetStatement);
+        if (targetExpressionIndex < 0 || targetExpressionIndex >= targetExpressions.size()) {
+            return false;
+        }
+
+        Expression expression = targetExpressions.get(targetExpressionIndex);
+        if (!expression.isBinaryExpr()) {
+            return false;
+        }
+
+        BinaryExpr binaryExpr = expression.asBinaryExpr();
+        BinaryExpr.Operator newOperator = fromBinaryOperatorCode(operatorCode);
+        if (newOperator == null || binaryExpr.getOperator() == newOperator) {
+            return false;
+        }
+
+        if (!candidateOperators(binaryExpr.getOperator()).contains(newOperator)) {
+            return false;
+        }
+
+        binaryExpr.setOperator(newOperator);
+        edits.add(edit);
+        return true;
+    }
+
+    private Integer selectTargetStatementIndex(Random random) {
+        List<Statement> statements = getMutableStatements();
         if (statements.isEmpty()) {
             return null;
         }
-        int index = random.nextInt(statements.size());
-        var donorStmt = statements.get(index);
-        return new Pair<>(donorStmt, index);
+
+        if (random.nextDouble() < TARGET_EXPLORATION_PROBABILITY) {
+            return random.nextInt(statements.size());
+        }
+
+        List<Double> weights = new ArrayList<>(statements.size());
+        for (Statement statement : statements) {
+            double score = Math.max(getStatementSuspiciousness(statement), MIN_SELECTION_WEIGHT);
+            weights.add(score);
+        }
+
+        Integer weightedIndex = chooseWeightedIndex(weights, random);
+        return weightedIndex != null ? weightedIndex : random.nextInt(statements.size());
+    }
+
+    private Integer selectDonorStatementIndex(int targetIndex, Edit.Type operation, Random random) {
+        List<Statement> statements = getMutableStatements();
+        if (statements.size() < 2) {
+            return null;
+        }
+
+        Statement target = getMutableStatementAt(targetIndex);
+        if (target == null) {
+            return null;
+        }
+
+        List<Integer> candidates = new ArrayList<>();
+        for (int i = 0; i < statements.size(); i++) {
+            if (i == targetIndex && operation != REPLACE_EXPR) {
+                continue;
+            }
+
+            Statement donor = statements.get(i);
+            if (operation == SWAP && !target.getClass().equals(donor.getClass())) {
+                continue;
+            }
+            if (operation == REPLACE_EXPR && getReplaceableExpressions(donor).isEmpty()) {
+                continue;
+            }
+            candidates.add(i);
+        }
+
+        if (candidates.isEmpty()) {
+            return null;
+        }
+
+        // For expression replacement we strongly prefer same statement kind, but keep fallback diversity.
+        if (operation == REPLACE_EXPR && random.nextDouble() < 0.8) {
+            List<Integer> sameKind = new ArrayList<>();
+            for (Integer candidate : candidates) {
+                if (statements.get(candidate).getClass().equals(target.getClass())) {
+                    sameKind.add(candidate);
+                }
+            }
+            if (!sameKind.isEmpty()) {
+                candidates = sameKind;
+            }
+        }
+
+        return candidates.get(random.nextInt(candidates.size()));
+    }
+
+    private Integer chooseWeightedIndex(List<Double> weights, Random random) {
+        double total = 0.0;
+        for (double weight : weights) {
+            total += Math.max(0.0, weight);
+        }
+        if (total <= 0.0) {
+            return null;
+        }
+
+        double pick = random.nextDouble() * total;
+        double cumulative = 0.0;
+        for (int i = 0; i < weights.size(); i++) {
+            cumulative += Math.max(0.0, weights.get(i));
+            if (pick <= cumulative) {
+                return i;
+            }
+        }
+        return weights.size() - 1;
+    }
+
+    private double getStatementSuspiciousness(Statement statement) {
+        if (statement.getRange().isPresent()) {
+            Range range = statement.getRange().get();
+            if (range.begin.line >= 0 && range.end.line >= range.begin.line) {
+                double maxWeight = 0.0;
+                for (int line = range.begin.line; line <= range.end.line; line++) {
+                    maxWeight = Math.max(maxWeight, suspiciousness.getOrDefault(line, 0.0));
+                }
+                if (maxWeight > 0.0) {
+                    return maxWeight;
+                }
+            }
+        }
+
+        int beginLine = statement.getBegin().map(position -> position.line).orElse(-1);
+        if (beginLine >= 0) {
+            return suspiciousness.getOrDefault(beginLine, UNKNOWN_SUSPICIOUSNESS);
+        }
+        return UNKNOWN_SUSPICIOUSNESS;
+    }
+
+    private List<Expression> getReplaceableExpressions(Statement statement) {
+        return statement.findAll(Expression.class).stream()
+            .filter(this::isReplaceableExpression)
+            .toList();
+    }
+
+    private boolean isReplaceableExpression(Expression expression) {
+        return !expression.isLiteralExpr() && !expression.isLambdaExpr();
+    }
+
+    private Integer selectExpressionIndex(List<Expression> expressions, Random random, boolean weighted) {
+        if (expressions.isEmpty()) {
+            return null;
+        }
+        if (!weighted) {
+            return random.nextInt(expressions.size());
+        }
+
+        List<Double> weights = new ArrayList<>(expressions.size());
+        for (Expression expression : expressions) {
+            weights.add(getExpressionPriority(expression));
+        }
+        Integer weightedIndex = chooseWeightedIndex(weights, random);
+        return weightedIndex != null ? weightedIndex : random.nextInt(expressions.size());
+    }
+
+    private double getExpressionPriority(Expression expression) {
+        if (expression.isArrayAccessExpr()) {
+            return 2.5;
+        }
+        if (expression.isMethodCallExpr()) {
+            return 2.0;
+        }
+        if (expression.isBinaryExpr()) {
+            BinaryExpr binaryExpr = expression.asBinaryExpr();
+            return switch (binaryExpr.getOperator()) {
+                case LESS, LESS_EQUALS, GREATER, GREATER_EQUALS, EQUALS, NOT_EQUALS -> 2.7;
+                default -> 1.8;
+            };
+        }
+        return 1.0;
+    }
+
+    private List<BinaryExpr.Operator> candidateOperators(BinaryExpr.Operator operator) {
+        List<BinaryExpr.Operator> options = switch (operator) {
+            case LESS, LESS_EQUALS, GREATER, GREATER_EQUALS ->
+                List.of(BinaryExpr.Operator.LESS, BinaryExpr.Operator.LESS_EQUALS,
+                        BinaryExpr.Operator.GREATER, BinaryExpr.Operator.GREATER_EQUALS);
+            case EQUALS, NOT_EQUALS ->
+                List.of(BinaryExpr.Operator.EQUALS, BinaryExpr.Operator.NOT_EQUALS);
+            default -> List.of();
+        };
+        return options.stream().filter(candidate -> candidate != operator).toList();
+    }
+
+    private Integer pickDifferentExpressionIndex(int size, int excludedIndex, Random random) {
+        if (size <= 1) {
+            return null;
+        }
+
+        int candidate = random.nextInt(size - 1);
+        if (candidate >= excludedIndex) {
+            candidate++;
+        }
+        return candidate;
+    }
+
+    private int binaryOperatorCode(BinaryExpr.Operator operator) {
+        return switch (operator) {
+            case LESS -> 1;
+            case LESS_EQUALS -> 2;
+            case GREATER -> 3;
+            case GREATER_EQUALS -> 4;
+            case EQUALS -> 5;
+            case NOT_EQUALS -> 6;
+            case PLUS -> 7;
+            case MINUS -> 8;
+            default -> 0;
+        };
+    }
+
+    private BinaryExpr.Operator fromBinaryOperatorCode(int code) {
+        return switch (code) {
+            case 1 -> BinaryExpr.Operator.LESS;
+            case 2 -> BinaryExpr.Operator.LESS_EQUALS;
+            case 3 -> BinaryExpr.Operator.GREATER;
+            case 4 -> BinaryExpr.Operator.GREATER_EQUALS;
+            case 5 -> BinaryExpr.Operator.EQUALS;
+            case 6 -> BinaryExpr.Operator.NOT_EQUALS;
+            case 7 -> BinaryExpr.Operator.PLUS;
+            case 8 -> BinaryExpr.Operator.MINUS;
+            default -> null;
+        };
+    }
+
+    private void invalidateRanges(Node node) {
+        node.walk(n -> n.setRange(INVALID_RANGE));
+    }
+
+    private Statement getMutableStatementAt(int index) {
+        List<Statement> statements = getMutableStatements();
+        if (index < 0 || index >= statements.size()) {
+            return null;
+        }
+        return statements.get(index);
+    }
+
+    private List<Statement> getMutableStatements() {
+        // Block statements are not directly mutated/swapped in this representation.
+        return compilationUnit.findAll(Statement.class).stream()
+            .filter(statement -> !statement.isBlockStmt())
+            .toList();
     }
 
     public CompilationUnit getCompilationUnit() {
