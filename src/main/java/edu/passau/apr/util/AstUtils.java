@@ -13,7 +13,7 @@ public final class AstUtils {
         if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
             return false;
         }
-        if (expression.isNameExpr() || expression.isThisExpr() || expression.isSuperExpr()) {
+        if (expression.isThisExpr() || expression.isSuperExpr()) {
             return false;
         }
         if (expression.isAnnotationExpr() || expression.isTypeExpr() || expression.isClassExpr()) {
@@ -27,6 +27,7 @@ public final class AstUtils {
         }
 
         return expression.isMethodCallExpr()
+            || expression.isNameExpr()
             || expression.isFieldAccessExpr()
             || expression.isArrayAccessExpr()
             || expression.isBinaryExpr()

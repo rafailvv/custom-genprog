@@ -34,24 +34,25 @@ public class Patch {
     private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
     private static final int MAX_EDITS_PER_PATCH = 3;
     private static final double TARGET_EXPLORATION_PROBABILITY = 0.20;
-    private static final double UNKNOWN_SUSPICIOUSNESS = 0.03;
+    private static final double UNKNOWN_SUSPICIOUSNESS = 0.0;
     private static final double MIN_SELECTION_WEIGHT = 0.01;
+    private static final int STATEMENT_WEIGHT_NEIGHBORHOOD = 2;
 
     private final CompilationUnit compilationUnit;
     private final Map<Integer, Double> suspiciousness;
-    private final double maxSuspiciousness;
+    private final boolean hasExactPositiveStatementWeight;
     private final List<Edit> edits = new ArrayList<>();
 
     public Patch(CompilationUnit cu, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = cu;
         this.suspiciousness = nodeWeights;
-        this.maxSuspiciousness = computeMaxSuspiciousness(nodeWeights);
+        this.hasExactPositiveStatementWeight = computeHasExactPositiveStatementWeight();
     }
 
     public Patch(String source, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = StaticJavaParser.parse(source);
         this.suspiciousness = nodeWeights;
-        this.maxSuspiciousness = computeMaxSuspiciousness(nodeWeights);
+        this.hasExactPositiveStatementWeight = computeHasExactPositiveStatementWeight();
     }
 
     public void doMutations(double mutationRate, Random random) {
@@ -62,55 +63,49 @@ public class Patch {
             return;
         }
 
-        List<Statement> statements = getMutableStatements();
-        if (statements.isEmpty()) {
+        List<Statement> snapshot = new ArrayList<>(getMutableStatements());
+        if (snapshot.isEmpty()) {
             return;
         }
 
-        List<Integer> candidateIndices = new ArrayList<>();
-        for (int i = 0; i < statements.size(); i++) {
-            double weight = mutationProbabilityWeight(statements.get(i));
-            if (weight > 0.0) {
-                candidateIndices.add(i);
-            }
-        }
-        if (candidateIndices.isEmpty()) {
-            return;
-        }
-        Collections.shuffle(candidateIndices, random);
-
-        // GenProg-style control: global mutation rate caps the max number of mutations per individual,
-        // and statement weights decide whether each candidate statement is mutated.
-        int maxByRate = (int) Math.ceil(mutationRate * candidateIndices.size());
-        int mutationBudget = Math.min(
-            MAX_EDITS_PER_PATCH - edits.size(),
-            Math.max(1, maxByRate)
-        );
-
-        int applied = 0;
-        for (Integer candidateIndex : candidateIndices) {
-            if (applied >= mutationBudget || edits.size() >= MAX_EDITS_PER_PATCH) {
+        // GenProg-style mutation loop:
+        // for each statement I_j, mutate it with probability mutationRate * W(I_j).
+        for (Statement originalStatement : snapshot) {
+            if (edits.size() >= MAX_EDITS_PER_PATCH) {
                 break;
             }
 
-            Statement targetStatement = getMutableStatementAt(candidateIndex);
-            if (targetStatement == null) {
+            double weight = mutationProbabilityWeight(originalStatement);
+            if (weight <= 0.0) {
+                continue;
+            }
+            if (random.nextDouble() > mutationRate) {
+                continue;
+            }
+            if (random.nextDouble() > weight) {
                 continue;
             }
 
-            if (random.nextDouble() > mutationProbabilityWeight(targetStatement)) {
+            Integer currentIndex = currentStatementIndex(originalStatement);
+            if (currentIndex == null) {
                 continue;
             }
 
-            Edit edit = createRandomEdit(candidateIndex, random);
-            if (edit != null && applyEdit(edit)) {
-                applied++;
+            Edit edit = createRandomEdit(currentIndex, random);
+            if (edit != null) {
+                applyEdit(edit);
             }
         }
     }
 
     public boolean applyEdit(Edit edit) {
         if (edits.size() >= MAX_EDITS_PER_PATCH) {
+            return false;
+        }
+        if (!isMutableTargetIndex(edit.statementIndex())) {
+            return false;
+        }
+        if (edit.type() == SWAP && (edit.donorStatementIndex() == null || !isMutableTargetIndex(edit.donorStatementIndex()))) {
             return false;
         }
 
@@ -146,28 +141,8 @@ public class Patch {
     }
 
     private double mutationProbabilityWeight(Statement statement) {
-        double rawWeight = getStatementSuspiciousness(statement);
-        if (rawWeight <= 0.0) {
-            return 0.0;
-        }
-
-        // GenProg mutates with probability W(I_j). We normalize the provided suspiciousness
-        // map once so the most suspicious statement in this program has probability 1.0.
-        double normalizedWeight = rawWeight / maxSuspiciousness;
-        return Math.max(0.0, Math.min(1.0, normalizedWeight));
-    }
-
-    private double computeMaxSuspiciousness(Map<Integer, Double> nodeWeights) {
-        if (nodeWeights == null || nodeWeights.isEmpty()) {
-            return 1.0;
-        }
-        double max = 0.0;
-        for (Double value : nodeWeights.values()) {
-            if (value != null && value > max) {
-                max = value;
-            }
-        }
-        return max > 0.0 ? max : 1.0;
+        // Keep GenProg semantics: mutate statement I_j with probability W(I_j).
+        return Math.max(0.0, Math.min(1.0, getStatementSuspiciousness(statement)));
     }
 
     private Edit createRandomEdit(int targetStatementIndex, Random random) {
@@ -481,6 +456,9 @@ public class Patch {
                 if (operation == SWAP && i == targetIndex) {
                     continue;
                 }
+                if (operation == SWAP && mutationProbabilityWeight(statements.get(i)) <= 0.0) {
+                    continue;
+                }
                 donors.add(i);
             }
             if (donors.isEmpty()) {
@@ -562,15 +540,94 @@ public class Patch {
         return weights.size() - 1;
     }
 
+    private Integer currentStatementIndex(Statement statement) {
+        List<Statement> currentStatements = getMutableStatements();
+        for (int i = 0; i < currentStatements.size(); i++) {
+            if (currentStatements.get(i) == statement) {
+                return i;
+            }
+        }
+        return null;
+    }
+
     private double getStatementSuspiciousness(Statement statement) {
+        if (suspiciousness == null || suspiciousness.isEmpty()) {
+            return UNKNOWN_SUSPICIOUSNESS;
+        }
+
+        double exact = getExactStatementSuspiciousness(statement);
+        if (exact > 0.0) {
+            return exact;
+        }
+        if (hasExactPositiveStatementWeight) {
+            return MIN_SELECTION_WEIGHT * TARGET_EXPLORATION_PROBABILITY;
+        }
+
         if (statement.getRange().isPresent()) {
             Range range = statement.getRange().get();
             if (range.begin.line >= 0 && range.end.line >= range.begin.line) {
+                int from = Math.max(1, range.begin.line - STATEMENT_WEIGHT_NEIGHBORHOOD);
+                int to = range.end.line + STATEMENT_WEIGHT_NEIGHBORHOOD;
+                double neighborhoodMax = 0.0;
+                for (int line = from; line <= to; line++) {
+                    neighborhoodMax = Math.max(neighborhoodMax, suspiciousness.getOrDefault(line, 0.0));
+                }
+                if (neighborhoodMax > 0.0) {
+                    return neighborhoodMax;
+                }
+            }
+        }
+
+        int beginLine = statement.getBegin().map(position -> position.line).orElse(-1);
+        if (beginLine >= 0) {
+            int from = Math.max(1, beginLine - STATEMENT_WEIGHT_NEIGHBORHOOD);
+            int to = beginLine + STATEMENT_WEIGHT_NEIGHBORHOOD;
+            double neighborhoodMax = 0.0;
+            for (int line = from; line <= to; line++) {
+                neighborhoodMax = Math.max(neighborhoodMax, suspiciousness.getOrDefault(line, 0.0));
+            }
+            if (neighborhoodMax > 0.0) {
+                return neighborhoodMax;
+            }
+        }
+
+        return UNKNOWN_SUSPICIOUSNESS;
+    }
+
+    private boolean isMutableTargetIndex(int index) {
+        Statement statement = getMutableStatementAt(index);
+        if (statement == null) {
+            return false;
+        }
+        return mutationProbabilityWeight(statement) > 0.0;
+    }
+
+    private boolean computeHasExactPositiveStatementWeight() {
+        if (suspiciousness == null || suspiciousness.isEmpty()) {
+            return false;
+        }
+        for (Statement statement : getMutableStatements()) {
+            if (getExactStatementSuspiciousness(statement) > 0.0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double getExactStatementSuspiciousness(Statement statement) {
+        if (statement.getRange().isPresent()) {
+            Range range = statement.getRange().get();
+            if (range.begin.line >= 0 && range.end.line >= range.begin.line) {
+                boolean mappedLineSeen = false;
                 double maxWeight = 0.0;
                 for (int line = range.begin.line; line <= range.end.line; line++) {
-                    maxWeight = Math.max(maxWeight, suspiciousness.getOrDefault(line, 0.0));
+                    Double lineWeight = suspiciousness.get(line);
+                    if (lineWeight != null) {
+                        mappedLineSeen = true;
+                        maxWeight = Math.max(maxWeight, lineWeight);
+                    }
                 }
-                if (maxWeight > 0.0) {
+                if (mappedLineSeen) {
                     return maxWeight;
                 }
             }
@@ -578,8 +635,8 @@ public class Patch {
 
         int beginLine = statement.getBegin().map(position -> position.line).orElse(-1);
         if (beginLine >= 0) {
-            double beginWeight = suspiciousness.getOrDefault(beginLine, UNKNOWN_SUSPICIOUSNESS);
-            if (beginWeight > 0.0) {
+            Double beginWeight = suspiciousness.get(beginLine);
+            if (beginWeight != null) {
                 return beginWeight;
             }
         }
@@ -633,7 +690,7 @@ public class Patch {
             BinaryExpr binaryExpr = expression.asBinaryExpr();
             return switch (binaryExpr.getOperator()) {
                 case LESS, LESS_EQUALS, GREATER, GREATER_EQUALS, EQUALS, NOT_EQUALS -> 2.7;
-                default -> 1.8;
+                default -> 2.8;
             };
         }
         return 1.0;

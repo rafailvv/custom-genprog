@@ -64,17 +64,6 @@ public class GeneticAlgorithm {
         while (!isFinished()) {
             currentGeneration++;
 
-            System.out.println("=== Generation " + currentGeneration + " ===");
-            for (int i = 0; i < population.size(); i++) {
-                System.out.printf("Patch %d: Fitness = %.2f (Passing: %d, Failing: %d)%n",
-                                  i, fitnesses.get(i).fitness(),
-                                  fitnesses.get(i).passingTests(),
-                                  fitnesses.get(i).failingTests());
-                System.out.println(population.get(i));
-                // System.out.println(population.get(i).getCompilationUnit().toString());
-                System.out.println("---");
-            }
-
             List<Patch> viablePatches = new ArrayList<>();
             List<Patch> newPopulation = new ArrayList<>();
             List<FitnessResult> viFit = new ArrayList<>();
@@ -91,11 +80,8 @@ public class GeneticAlgorithm {
 
             int currentEliteSize = Math.min(maxEliteSize, viablePatches.size());
             if (currentEliteSize > 0) {
-                elitePatches = getTopPatches(viablePatches, fitnesses, currentEliteSize);
+                elitePatches = getTopPatches(viablePatches, viFit, currentEliteSize);
             }
-
-            System.out.println("Current elite patches:");
-            elitePatches.forEach(System.out::println);
 
             // crossover
             List<Patch> selectedParents = select(viablePatches, viFit, populationSize / 2);
