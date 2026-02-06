@@ -1,4 +1,5 @@
 public class ListStreamUtils {
+
     public static String joinObjectsWithComma(Object... objects) {
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < objects.length; i++) {

@@ -1,10 +1,11 @@
 public class ListStreamUtils {
+
     public static String joinObjectsWithComma(Object... objects) {
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < objects.length; i++) {
             result.append(objects[i]);
             if (i < objects.length - 1) {
-                System.out.println("Append here");
+                result.append(", ");
             }
         }
         return result.toString();
