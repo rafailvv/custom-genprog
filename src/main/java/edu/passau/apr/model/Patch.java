@@ -14,6 +14,7 @@ import com.github.javaparser.ast.stmt.Statement;
 import edu.passau.apr.util.AstUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -32,8 +33,6 @@ import static edu.passau.apr.model.Edit.Type.SWAP;
 public class Patch {
     private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
     private static final int MAX_EDITS_PER_PATCH = 3;
-    private static final int MAX_MUTATION_RETRIES = 24;
-    private static final int MAX_EDITS_PER_MUTATION = 3;
     private static final double TARGET_EXPLORATION_PROBABILITY = 0.20;
     private static final double UNKNOWN_SUSPICIOUSNESS = 0.01;
     private static final double MIN_SELECTION_WEIGHT = 0.01;
@@ -56,22 +55,51 @@ public class Patch {
         if (edits.size() >= MAX_EDITS_PER_PATCH) {
             return;
         }
+        if (mutationRate <= 0.0) {
+            return;
+        }
 
+        List<Statement> statements = getMutableStatements();
+        if (statements.isEmpty()) {
+            return;
+        }
+
+        List<Integer> candidateIndices = new ArrayList<>();
+        for (int i = 0; i < statements.size(); i++) {
+            double weight = mutationProbabilityWeight(statements.get(i));
+            if (weight > 0.0) {
+                candidateIndices.add(i);
+            }
+        }
+        if (candidateIndices.isEmpty()) {
+            return;
+        }
+        Collections.shuffle(candidateIndices, random);
+
+        // GenProg-style control: global mutation rate caps the max number of mutations per individual,
+        // and statement weights decide whether each candidate statement is mutated.
+        int maxByRate = (int) Math.ceil(mutationRate * candidateIndices.size());
         int mutationBudget = Math.min(
             MAX_EDITS_PER_PATCH - edits.size(),
-            determineMutationBudget(mutationRate, random)
+            Math.max(1, maxByRate)
         );
 
         int applied = 0;
-        int retries = 0;
-        while (applied < mutationBudget && retries < MAX_MUTATION_RETRIES) {
-            retries++;
-            Integer targetStatementIndex = selectTargetStatementIndex(random);
-            if (targetStatementIndex == null) {
-                return;
+        for (Integer candidateIndex : candidateIndices) {
+            if (applied >= mutationBudget || edits.size() >= MAX_EDITS_PER_PATCH) {
+                break;
             }
 
-            Edit edit = createRandomEdit(targetStatementIndex, random);
+            Statement targetStatement = getMutableStatementAt(candidateIndex);
+            if (targetStatement == null) {
+                continue;
+            }
+
+            if (random.nextDouble() > mutationProbabilityWeight(targetStatement)) {
+                continue;
+            }
+
+            Edit edit = createRandomEdit(candidateIndex, random);
             if (edit != null && applyEdit(edit)) {
                 applied++;
             }
@@ -114,13 +142,8 @@ public class Patch {
         return patchCopy;
     }
 
-    private int determineMutationBudget(double mutationRate, Random random) {
-        int budget = 1;
-        double boostedMutationRate = Math.min(0.65, Math.max(0.0, mutationRate * 3.0));
-        while (budget < MAX_EDITS_PER_MUTATION && random.nextDouble() < boostedMutationRate) {
-            budget++;
-        }
-        return budget;
+    private double mutationProbabilityWeight(Statement statement) {
+        return Math.max(0.0, Math.min(1.0, getStatementSuspiciousness(statement)));
     }
 
     private Edit createRandomEdit(int targetStatementIndex, Random random) {
