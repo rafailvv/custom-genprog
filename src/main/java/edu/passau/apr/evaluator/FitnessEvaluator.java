@@ -35,9 +35,10 @@ public class FitnessEvaluator {
 
     private record CompilationResult(boolean success, String classPath) {}
     private record TestExecutionResult(int passingCount, int failingCount, int totalCount) {}
-    private static final int EVALUATION_TIMEOUT_SEC = 4;
-    private static final int COMPILATION_TIMEOUT_SEC = 2;
-    private static final int TEST_TIMEOUT_SEC = 1;
+    // End-to-end evaluation should be long enough for compile + full suite execution.
+    private static final int EVALUATION_TIMEOUT_SEC = 30;
+    private static final int COMPILATION_TIMEOUT_SEC = 5;
+    private static final int TEST_TIMEOUT_SEC = 2;
     private static final Object STD_IO_LOCK = new Object();
 
     private final String buggySourcePath;
