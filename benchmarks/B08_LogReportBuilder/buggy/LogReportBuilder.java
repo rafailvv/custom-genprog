@@ -89,12 +89,12 @@ public class LogReportBuilder {
         List<Map.Entry<String, EndpointStats>> entries = new ArrayList<>(stats.entrySet());
 
         entries.sort((a, b) -> {
-            int failCmp = Integer.compare(a.getValue().failCount, b.getValue().failCount);
+            int failCmp = Integer.compare(b.getValue().failCount, a.getValue().failCount);
             if (failCmp != 0) {
                 return failCmp;
             }
             int latencyCmp = Integer.compare(b.getValue().avgLatency(), a.getValue().avgLatency());
-            if (latencyCmp != 0) {
+            if (latencyCmp == 0) {
                 return latencyCmp;
             }
             return a.getKey().compareTo(b.getKey());
