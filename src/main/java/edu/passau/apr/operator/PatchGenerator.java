@@ -8,6 +8,7 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.stmt.Statement;
 import edu.passau.apr.model.Edit;
 import edu.passau.apr.model.Patch;
+import edu.passau.apr.util.AstUtils;
 import edu.passau.apr.util.Pair;
 
 import java.util.ArrayList;
@@ -401,78 +402,14 @@ public class PatchGenerator {
 
     private List<Expression> getReplaceableExpressions(Statement statement) {
         return statement.findAll(Expression.class).stream()
-            .filter(this::isReplaceableExpression)
+            .filter(AstUtils::isReplaceableExpression)
             .toList();
     }
 
     private List<Expression> getNegatableExpressions(Statement statement) {
         return statement.findAll(Expression.class).stream()
-            .filter(this::isNegatableExpression)
+            .filter(AstUtils::isNegatableExpression)
             .toList();
-    }
-
-    private boolean isReplaceableExpression(Expression expression) {
-        // Mirror Patch-side filtering to keep seed edits valid after application.
-        if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
-            return false;
-        }
-        if (expression.isNameExpr() || expression.isThisExpr() || expression.isSuperExpr()) {
-            return false;
-        }
-        if (expression.isAnnotationExpr() || expression.isTypeExpr() || expression.isClassExpr()) {
-            return false;
-        }
-        if (expression.isMethodReferenceExpr() || expression.isArrayInitializerExpr()) {
-            return false;
-        }
-        if (expression.isAssignExpr() || expression.isVariableDeclarationExpr()) {
-            return false;
-        }
-
-        return expression.isMethodCallExpr()
-            || expression.isFieldAccessExpr()
-            || expression.isArrayAccessExpr()
-            || expression.isBinaryExpr()
-            || expression.isUnaryExpr()
-            || expression.isEnclosedExpr()
-            || expression.isCastExpr()
-            || expression.isConditionalExpr()
-            || expression.isInstanceOfExpr();
-    }
-
-    private boolean isNegatableExpression(Expression expression) {
-        if (expression.isLambdaExpr() || expression.isLiteralExpr()) {
-            return false;
-        }
-        if (expression.isAssignExpr() || expression.isConditionalExpr()) {
-            return false;
-        }
-        if (expression.isArrayInitializerExpr() || expression.isObjectCreationExpr()) {
-            return false;
-        }
-        if (expression.isMethodReferenceExpr()) {
-            return false;
-        }
-        if (expression.isClassExpr() || expression.isTypeExpr()) {
-            return false;
-        }
-        if (expression.getParentNode().isEmpty()
-            || !(expression.getParentNode().get() instanceof com.github.javaparser.ast.expr.ConditionalExpr conditional)) {
-            return false;
-        }
-        boolean isConditionalBranch = conditional.getThenExpr() == expression || conditional.getElseExpr() == expression;
-        if (!isConditionalBranch) {
-            return false;
-        }
-
-        return expression.isNameExpr()
-            || expression.isFieldAccessExpr()
-            || expression.isArrayAccessExpr()
-            || expression.isMethodCallExpr()
-            || expression.isEnclosedExpr()
-            || expression.isCastExpr()
-            || expression.isUnaryExpr()
-            || expression.isBinaryExpr();
     }
 
     private double expressionPriority(Expression expression) {

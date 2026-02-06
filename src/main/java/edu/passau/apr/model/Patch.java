@@ -11,6 +11,7 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.UnaryExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.Statement;
+import edu.passau.apr.util.AstUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -547,87 +548,14 @@ public class Patch {
 
     private List<Expression> getReplaceableExpressions(Statement statement) {
         return statement.findAll(Expression.class).stream()
-            .filter(this::isReplaceableExpression)
+            .filter(AstUtils::isReplaceableExpression)
             .toList();
     }
 
     private List<Expression> getNegatableExpressions(Statement statement) {
         return statement.findAll(Expression.class).stream()
-            .filter(this::isNegatableExpression)
+            .filter(AstUtils::isNegatableExpression)
             .toList();
-    }
-
-    private boolean isReplaceableExpression(Expression expression) {
-        // Keep REPLACE_EXPR in a type-stable subset; raw names/literals cause many uncompilable swaps.
-        if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
-            return false;
-        }
-        if (expression.isNameExpr() || expression.isThisExpr() || expression.isSuperExpr()) {
-            return false;
-        }
-        if (expression.isAnnotationExpr() || expression.isTypeExpr() || expression.isClassExpr()) {
-            return false;
-        }
-        if (expression.isMethodReferenceExpr() || expression.isArrayInitializerExpr()) {
-            return false;
-        }
-        if (expression.isAssignExpr() || expression.isVariableDeclarationExpr()) {
-            return false;
-        }
-
-        return expression.isMethodCallExpr()
-            || expression.isFieldAccessExpr()
-            || expression.isArrayAccessExpr()
-            || expression.isBinaryExpr()
-            || expression.isUnaryExpr()
-            || expression.isEnclosedExpr()
-            || expression.isCastExpr()
-            || expression.isConditionalExpr()
-            || expression.isInstanceOfExpr();
-    }
-
-    private boolean isNegatableExpression(Expression expression) {
-        // NEGATE_EXPRESSION is intentionally scoped to conditional branches only.
-        if (expression.isLambdaExpr() || expression.isLiteralExpr()) {
-            return false;
-        }
-        if (expression.isAssignExpr()) {
-            return false;
-        }
-        if (expression.isConditionalExpr()) {
-            return false;
-        }
-        if (expression.isArrayInitializerExpr()) {
-            return false;
-        }
-        if (expression.isObjectCreationExpr()) {
-            return false;
-        }
-        if (expression.isMethodReferenceExpr()) {
-            return false;
-        }
-        if (expression.isClassExpr() || expression.isTypeExpr()) {
-            return false;
-        }
-
-        if (expression.getParentNode().isEmpty()
-            || !(expression.getParentNode().get() instanceof com.github.javaparser.ast.expr.ConditionalExpr conditional)) {
-            return false;
-        }
-
-        boolean isConditionalBranch = conditional.getThenExpr() == expression || conditional.getElseExpr() == expression;
-        if (!isConditionalBranch) {
-            return false;
-        }
-
-        return expression.isNameExpr()
-            || expression.isFieldAccessExpr()
-            || expression.isArrayAccessExpr()
-            || expression.isMethodCallExpr()
-            || expression.isEnclosedExpr()
-            || expression.isCastExpr()
-            || expression.isUnaryExpr()
-            || expression.isBinaryExpr();
     }
 
     private Integer selectExpressionIndex(List<Expression> expressions, Random random, boolean weighted) {
