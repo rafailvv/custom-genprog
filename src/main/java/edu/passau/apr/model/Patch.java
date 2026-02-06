@@ -34,21 +34,24 @@ public class Patch {
     private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
     private static final int MAX_EDITS_PER_PATCH = 3;
     private static final double TARGET_EXPLORATION_PROBABILITY = 0.20;
-    private static final double UNKNOWN_SUSPICIOUSNESS = 0.01;
+    private static final double UNKNOWN_SUSPICIOUSNESS = 0.03;
     private static final double MIN_SELECTION_WEIGHT = 0.01;
 
     private final CompilationUnit compilationUnit;
     private final Map<Integer, Double> suspiciousness;
+    private final double maxSuspiciousness;
     private final List<Edit> edits = new ArrayList<>();
 
     public Patch(CompilationUnit cu, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = cu;
         this.suspiciousness = nodeWeights;
+        this.maxSuspiciousness = computeMaxSuspiciousness(nodeWeights);
     }
 
     public Patch(String source, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = StaticJavaParser.parse(source);
         this.suspiciousness = nodeWeights;
+        this.maxSuspiciousness = computeMaxSuspiciousness(nodeWeights);
     }
 
     public void doMutations(double mutationRate, Random random) {
@@ -143,7 +146,25 @@ public class Patch {
     }
 
     private double mutationProbabilityWeight(Statement statement) {
-        return Math.max(0.0, Math.min(1.0, getStatementSuspiciousness(statement)));
+        double rawWeight = getStatementSuspiciousness(statement);
+        if (rawWeight <= 0.0) {
+            return 0.0;
+        }
+
+        // GenProg mutates with probability W(I_j). We normalize the provided suspiciousness
+        // map once so the most suspicious statement in this program has probability 1.0.
+        double normalizedWeight = rawWeight / maxSuspiciousness;
+        return Math.max(0.0, Math.min(1.0, normalizedWeight));
+    }
+
+    private double computeMaxSuspiciousness(Map<Integer, Double> nodeWeights) {
+        double max = 0.0;
+        for (Double value : nodeWeights.values()) {
+            if (value != null && value > max) {
+                max = value;
+            }
+        }
+        return max > 0.0 ? max : 1.0;
     }
 
     private Edit createRandomEdit(int targetStatementIndex, Random random) {
@@ -256,23 +277,21 @@ public class Patch {
     }
 
     private Edit.Type chooseMutationOperation(Random random) {
-        double roll = random.nextDouble();
-        if (roll < 0.08) {
-            return DELETE;
+        // GenProg core operator set is DELETE/INSERT/SWAP.
+        // Keep a small extension window for expression-level mutations so Java benchmarks
+        // requiring operator/value tweaks remain solvable without hardcoding.
+        if (random.nextDouble() < 0.75) {
+            return switch (random.nextInt(3)) {
+                case 0 -> DELETE;
+                case 1 -> INSERT;
+                default -> SWAP;
+            };
         }
-        if (roll < 0.16) {
-            return INSERT;
-        }
-        if (roll < 0.22) {
-            return SWAP;
-        }
-        if (roll < 0.58) {
-            return REPLACE_EXPR;
-        }
-        if (roll < 0.88) {
-            return MUTATE_BINARY_OPERATOR;
-        }
-        return NEGATE_EXPRESSION;
+        return switch (random.nextInt(3)) {
+            case 0 -> REPLACE_EXPR;
+            case 1 -> MUTATE_BINARY_OPERATOR;
+            default -> NEGATE_EXPRESSION;
+        };
     }
 
     private boolean applyDelete(Edit edit) {
@@ -321,9 +340,6 @@ public class Patch {
         }
 
         if (target.isAncestorOf(donor) || donor.isAncestorOf(target)) {
-            return false;
-        }
-        if (!target.getClass().equals(donor.getClass())) {
             return false;
         }
 
@@ -475,6 +491,20 @@ public class Patch {
             return null;
         }
 
+        if (operation == INSERT || operation == SWAP) {
+            List<Integer> donors = new ArrayList<>();
+            for (int i = 0; i < statements.size(); i++) {
+                if (operation == SWAP && i == targetIndex) {
+                    continue;
+                }
+                donors.add(i);
+            }
+            if (donors.isEmpty()) {
+                return null;
+            }
+            return donors.get(random.nextInt(donors.size()));
+        }
+
         Statement target = getMutableStatementAt(targetIndex);
         if (target == null) {
             return null;
@@ -564,7 +594,10 @@ public class Patch {
 
         int beginLine = statement.getBegin().map(position -> position.line).orElse(-1);
         if (beginLine >= 0) {
-            return suspiciousness.getOrDefault(beginLine, UNKNOWN_SUSPICIOUSNESS);
+            double beginWeight = suspiciousness.getOrDefault(beginLine, UNKNOWN_SUSPICIOUSNESS);
+            if (beginWeight > 0.0) {
+                return beginWeight;
+            }
         }
         return UNKNOWN_SUSPICIOUSNESS;
     }

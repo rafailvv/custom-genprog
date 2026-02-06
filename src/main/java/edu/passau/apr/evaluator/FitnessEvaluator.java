@@ -24,7 +24,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.*;
 
 /**
@@ -34,7 +38,8 @@ import java.util.concurrent.*;
 public class FitnessEvaluator {
 
     private record CompilationResult(boolean success, String classPath) {}
-    private record TestExecutionResult(int passingCount, int failingCount, int totalCount) {}
+    private record TestExecutionResult(int passingCount, int failingCount, int totalCount,
+                                       Set<String> passedTests, Set<String> discoveredTests) {}
     // End-to-end evaluation should be long enough for compile + full suite execution.
     private static final int EVALUATION_TIMEOUT_SEC = 30;
     private static final int COMPILATION_TIMEOUT_SEC = 5;
@@ -50,6 +55,9 @@ public class FitnessEvaluator {
     private final Path tempDir;
     private final String mainClassName;
     private final Path testClassesDir; // Pre-compiled test classes
+    private Set<String> positiveTestIds = Set.of();
+    private Set<String> negativeTestIds = Set.of();
+    private Set<String> allTestIds = Set.of();
 
     public FitnessEvaluator(String buggySourcePath, String fixedSourcePath, String testSourcePath, 
                            List<String> testClassNames,
@@ -67,6 +75,7 @@ public class FitnessEvaluator {
         Files.createDirectories(testClassesDir);
         
         precompileTests();
+        initializeFitnessPartitions();
     }
     
     private void precompileTests() {
@@ -117,6 +126,30 @@ public class FitnessEvaluator {
         }
     }
 
+    private void initializeFitnessPartitions() {
+        try {
+            CompilationResult baselineCompile = compile(new File(buggySourcePath), testSourcePath);
+            if (!baselineCompile.success) {
+                return;
+            }
+
+            TestExecutionResult baseline = runTestsSilenced(baselineCompile.classPath);
+            if (baseline.discoveredTests.isEmpty()) {
+                return;
+            }
+
+            Set<String> discovered = new HashSet<>(baseline.discoveredTests);
+            Set<String> positives = new HashSet<>(baseline.passedTests);
+            Set<String> negatives = new HashSet<>(discovered);
+            negatives.removeAll(positives);
+
+            this.allTestIds = Set.copyOf(discovered);
+            this.positiveTestIds = Set.copyOf(positives);
+            this.negativeTestIds = Set.copyOf(negatives);
+        } catch (Exception ignored) {
+        }
+    }
+
     /**
      * Applies a patch to the source code and evaluates its fitness.
      */
@@ -131,12 +164,14 @@ public class FitnessEvaluator {
                 CompilationResult compileResult = compile(modifiedSourceFile.toFile(), testSourcePath);
 
                 if (!compileResult.success) {
-                    return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+                    return new FitnessResult(0, 0, 0, 0.0, false, false);
                 }
 
                 TestExecutionResult testResult = runTestsSilenced(compileResult.classPath);
 
-                double fitness = calculateFitness(testResult.passingCount, testResult.failingCount);
+                int positivePassed = countIntersection(testResult.passedTests, positiveTestIds);
+                int negativePassed = countIntersection(testResult.passedTests, negativeTestIds);
+                double fitness = calculateFitness(positivePassed, negativePassed);
                 boolean allPass = testResult.failingCount == 0 && testResult.totalCount > 0 && testResult.passingCount > 0;
 
                 return new FitnessResult(
@@ -149,7 +184,7 @@ public class FitnessEvaluator {
                 );
 
             } catch (Exception e) {
-                return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+                return new FitnessResult(0, 0, 0, 0.0, false, false);
             }
         });
 
@@ -157,9 +192,9 @@ public class FitnessEvaluator {
             return future.get(EVALUATION_TIMEOUT_SEC, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+            return new FitnessResult(0, 0, 0, 0.0, false, false);
         } catch (Exception e) {
-            return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+            return new FitnessResult(0, 0, 0, 0.0, false, false);
         } finally {
             executor.shutdownNow();
         }
@@ -220,7 +255,7 @@ public class FitnessEvaluator {
         try {
             return runTestsWithJUnitLauncher(classPath);
         } catch (Exception e) {
-            return new TestExecutionResult(0, 0, 0);
+            return new TestExecutionResult(0, 0, 0, Set.of(), Set.of());
         }
     }
 
@@ -256,7 +291,7 @@ public class FitnessEvaluator {
             String systemClasspath = System.getProperty("java.class.path");
             List<URL> urls = new ArrayList<>();
             
-            String[] classPathEntries = classPath.split(":");
+            String[] classPathEntries = classPath.split(java.util.regex.Pattern.quote(File.pathSeparator));
             for (String entry : classPathEntries) {
                 if (!entry.isEmpty()) {
                     try {
@@ -284,10 +319,12 @@ public class FitnessEvaluator {
             }
             
             if (urls.isEmpty()) {
-                return new TestExecutionResult(0, 0, 0);
+                return new TestExecutionResult(0, 0, 0, Set.of(), Set.of());
             }
             
             classLoader = new URLClassLoader(urls.toArray(new URL[0]), null);
+            Set<String> passedTests = new HashSet<>();
+            Set<String> discoveredTests = new HashSet<>();
 
             for (String testClassName : testClassNames) {
                 try {
@@ -295,6 +332,7 @@ public class FitnessEvaluator {
                     
                     // Find and run test methods
                     java.lang.reflect.Method[] methods = testClass.getDeclaredMethods();
+                    Arrays.sort(methods, Comparator.comparing(java.lang.reflect.Method::getName));
                     for (java.lang.reflect.Method method : methods) {
                         // Check for @Test annotation by name (to avoid import issues)
                         boolean hasTestAnnotation = false;
@@ -309,6 +347,8 @@ public class FitnessEvaluator {
                         }
                         
                         if (hasTestAnnotation) {
+                            String testId = testClassName + "#" + method.getName();
+                            discoveredTests.add(testId);
                             totalCount++;
                             try {
                                 java.lang.reflect.Constructor<?> constructor = testClass.getDeclaredConstructor();
@@ -329,6 +369,7 @@ public class FitnessEvaluator {
                                 try {
                                     future.get(TEST_TIMEOUT_SEC, TimeUnit.SECONDS);
                                     passingCount++;
+                                    passedTests.add(testId);
                                 } catch (TimeoutException e) {
                                     future.cancel(true);
                                     failingCount++;
@@ -346,7 +387,19 @@ public class FitnessEvaluator {
                 }
             }
 
+            if (allTestIds.isEmpty() && !discoveredTests.isEmpty()) {
+                allTestIds = Set.copyOf(discoveredTests);
+            }
+
+            return new TestExecutionResult(
+                passingCount,
+                failingCount,
+                totalCount,
+                Set.copyOf(passedTests),
+                Set.copyOf(discoveredTests)
+            );
         } catch (Exception e) {
+            return new TestExecutionResult(0, 0, 0, Set.of(), Set.of());
         } finally {
             if (classLoader != null) {
                 try {
@@ -355,12 +408,30 @@ public class FitnessEvaluator {
                 }
             }
         }
-
-        return new TestExecutionResult(passingCount, failingCount, totalCount);
     }
 
-    private double calculateFitness(int passingTests, int failingTests) {
-        return positiveTestWeight * passingTests - negativeTestWeight * failingTests;
+    private double calculateFitness(int positivePassedTests, int negativePassedTests) {
+        return positiveTestWeight * positivePassedTests + negativeTestWeight * negativePassedTests;
+    }
+
+    private int countIntersection(Set<String> passedTests, Set<String> referenceSet) {
+        if (passedTests.isEmpty()) {
+            return 0;
+        }
+        if (referenceSet.isEmpty()) {
+            if (allTestIds.isEmpty()) {
+                return passedTests.size();
+            }
+            return 0;
+        }
+
+        int count = 0;
+        for (String testId : passedTests) {
+            if (referenceSet.contains(testId)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private ExecutorService newDaemonSingleThreadExecutor(String namePrefix) {
