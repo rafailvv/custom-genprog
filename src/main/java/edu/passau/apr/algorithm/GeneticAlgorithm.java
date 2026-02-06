@@ -19,6 +19,7 @@ import static java.util.Collections.shuffle;
  */
 public class GeneticAlgorithm {
     private final int populationSize;
+    private final int maxEliteSize;
     private final int maxGenerations;
     private final long timeLimitMs;
     private final double mutationWeight;
@@ -46,6 +47,7 @@ public class GeneticAlgorithm {
         this.random = random;
         this.patchGenerator = patchGenerator;
         this.fitnessEvaluator = fitnessEvaluator;
+        this.maxEliteSize = Math.max(2, populationSize / 10);
     }
 
     /**
@@ -62,11 +64,21 @@ public class GeneticAlgorithm {
         while (!isFinished()) {
             currentGeneration++;
 
+            System.out.println("=== Generation " + currentGeneration + " ===");
+            for (int i = 0; i < population.size(); i++) {
+                System.out.printf("Patch %d: Fitness = %.2f (Passing: %d, Failing: %d)%n",
+                                  i, fitnesses.get(i).fitness(),
+                                  fitnesses.get(i).passingTests(),
+                                  fitnesses.get(i).failingTests());
+                System.out.println(population.get(i));
+                // System.out.println(population.get(i).getCompilationUnit().toString());
+                System.out.println("---");
+            }
+
             List<Patch> viablePatches = new ArrayList<>();
             List<Patch> newPopulation = new ArrayList<>();
             List<FitnessResult> viFit = new ArrayList<>();
-            int eliteCount = hasAnyPassingTests(fitnesses) ? Math.min(2, population.size()) : 0;
-            List<Patch> elitePatches = getTopPatches(population, fitnesses, eliteCount);
+            List<Patch> elitePatches  = new ArrayList<>();
 
             // Collect viable patches (where at least one test passes)
             // Viable ← { (P, PathP) in Popul | f(P) > 0 }
@@ -77,13 +89,21 @@ public class GeneticAlgorithm {
                 }
             }
 
+            int currentEliteSize = Math.min(maxEliteSize, viablePatches.size());
+            if (currentEliteSize > 0) {
+                elitePatches = getTopPatches(viablePatches, fitnesses, currentEliteSize);
+            }
+
+            System.out.println("Current elite patches:");
+            elitePatches.forEach(System.out::println);
+
+            // crossover
             List<Patch> selectedParents = select(viablePatches, viFit, populationSize / 2);
             if (selectedParents.isEmpty()) {
                 selectedParents = select(population, fitnesses, Math.max(2, populationSize / 2));
             }
 
             var pairs = pairUp(selectedParents);
-            System.out.println("Selected " + pairs.size() + " pairs for crossover.");
             for (Pair<Patch, Patch> parents : pairs) {
                 Patch parentA = parents.first();
                 Patch parentB = parents.second();
@@ -103,37 +123,26 @@ public class GeneticAlgorithm {
                 ));
             }
 
-            if (newPopulation.isEmpty()) {
-                while (newPopulation.size() < populationSize) {
-                    newPopulation.add(patchGenerator.generateRandomPatch());
-                }
-            }
-
-            while (newPopulation.size() < populationSize) {
-                newPopulation.add(patchGenerator.generateRandomPatch());
-            }
-
-            if (newPopulation.size() > populationSize) {
-                newPopulation = new ArrayList<>(newPopulation.subList(0, populationSize));
-            }
-
             // mutate all patches in the new population
             newPopulation.forEach(p -> p.doMutations(mutationWeight, random));
 
-            // Keep the strongest variants unchanged (elitism) to avoid losing good repairs.
-            for (int i = 0; i < elitePatches.size() && i < newPopulation.size(); i++) {
-                newPopulation.set(i, elitePatches.get(i).copy());
+            // ensure population size is maintained
+            while (newPopulation.size() + elitePatches.size() < populationSize) {
+                newPopulation.add(patchGenerator.generateRandomPatch());
+            }
+            if (newPopulation.size() + elitePatches.size() > populationSize) {
+                newPopulation = newPopulation.subList(0, populationSize - elitePatches.size());
             }
 
-            System.out.println("After reproduction and mutation, population size: " + newPopulation.size());
+            // Keep the strongest variants unchanged (elitism) to avoid losing good repairs.
+            newPopulation.addAll(elitePatches);
 
             population = newPopulation;
             evaluatePopulation();
             logProgress();
         }
 
-        return new AlgorithmResult(bestPatch, bestFitness, currentGeneration,
-                                  System.currentTimeMillis() - startTime);
+        return new AlgorithmResult(bestPatch, bestFitness, currentGeneration, System.currentTimeMillis() - startTime);
     }
 
 
