@@ -14,7 +14,9 @@ import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.io.PrintStream;
 import java.io.StringWriter;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -36,6 +38,7 @@ public class FitnessEvaluator {
     private static final int EVALUATION_TIMEOUT_SEC = 4;
     private static final int COMPILATION_TIMEOUT_SEC = 2;
     private static final int TEST_TIMEOUT_SEC = 1;
+    private static final Object STD_IO_LOCK = new Object();
 
     private final String buggySourcePath;
     private final String fixedSourcePath;
@@ -130,7 +133,7 @@ public class FitnessEvaluator {
                     return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
                 }
 
-                TestExecutionResult testResult = runTests(compileResult.classPath);
+                TestExecutionResult testResult = runTestsSilenced(compileResult.classPath);
 
                 double fitness = calculateFitness(testResult.passingCount, testResult.failingCount);
                 boolean allPass = testResult.failingCount == 0 && testResult.totalCount > 0 && testResult.passingCount > 0;
@@ -217,6 +220,23 @@ public class FitnessEvaluator {
             return runTestsWithJUnitLauncher(classPath);
         } catch (Exception e) {
             return new TestExecutionResult(0, 0, 0);
+        }
+    }
+
+    private TestExecutionResult runTestsSilenced(String classPath) {
+        synchronized (STD_IO_LOCK) {
+            PrintStream originalOut = System.out;
+            PrintStream originalErr = System.err;
+            PrintStream silent = new PrintStream(OutputStream.nullOutputStream());
+            try {
+                System.setOut(silent);
+                System.setErr(silent);
+                return runTests(classPath);
+            } finally {
+                System.setOut(originalOut);
+                System.setErr(originalErr);
+                silent.close();
+            }
         }
     }
 

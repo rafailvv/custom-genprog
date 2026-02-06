@@ -624,9 +624,11 @@ public class PatchGenerator {
             return new Pair<>(p.copy(), q.copy());
         }
 
+        List<Edit> normalizedP = normalizeScriptToSourceCoordinates(p.getEdits());
+        List<Edit> normalizedQ = normalizeScriptToSourceCoordinates(q.getEdits());
         int cutoff = random.nextInt(sourceStatementCount);
-        List<Edit> cEdits = buildOffspringScript(p.getEdits(), q.getEdits(), cutoff);
-        List<Edit> dEdits = buildOffspringScript(q.getEdits(), p.getEdits(), cutoff);
+        List<Edit> cEdits = buildOffspringScript(normalizedP, normalizedQ, cutoff);
+        List<Edit> dEdits = buildOffspringScript(normalizedQ, normalizedP, cutoff);
 
         Patch c = new Patch(source, weights);
         Patch d = new Patch(source, weights);
@@ -651,6 +653,90 @@ public class PatchGenerator {
         }
 
         return childScript;
+    }
+
+    private List<Edit> normalizeScriptToSourceCoordinates(List<Edit> script) {
+        List<Edit> normalized = new ArrayList<>();
+        List<Integer> positionToSource = new ArrayList<>(sourceStatementCount);
+        for (int i = 0; i < sourceStatementCount; i++) {
+            positionToSource.add(i);
+        }
+
+        int syntheticSeed = sourceStatementCount;
+        for (Edit edit : script) {
+            Integer targetSource = resolveSourceIndex(positionToSource, edit.statementIndex());
+            if (targetSource == null) {
+                continue;
+            }
+
+            Integer donorSource = null;
+            if (requiresDonorStatement(edit.type())) {
+                donorSource = resolveSourceIndex(positionToSource, edit.donorStatementIndex());
+                if (donorSource == null) {
+                    continue;
+                }
+            }
+
+            Edit normalizedEdit = new Edit(
+                edit.type(),
+                targetSource,
+                donorSource,
+                edit.targetExpressionIndex(),
+                edit.donorExpressionIndex()
+            );
+            normalized.add(normalizedEdit);
+
+            switch (edit.type()) {
+                case DELETE -> removeAt(positionToSource, edit.statementIndex());
+                case INSERT -> {
+                    Integer donorPosition = edit.donorStatementIndex();
+                    Integer donorIdentity = resolveSourceIndex(positionToSource, donorPosition);
+                    if (isValidPosition(positionToSource, edit.statementIndex())) {
+                        int identity = donorIdentity != null ? donorIdentity : syntheticSeed++;
+                        positionToSource.add(edit.statementIndex(), identity);
+                    }
+                }
+                case SWAP -> swapAt(positionToSource, edit.statementIndex(), edit.donorStatementIndex());
+                default -> {
+                    // REPLACE_EXPR / MUTATE_BINARY_OPERATOR / NEGATE_EXPRESSION do not change statement layout.
+                }
+            }
+        }
+        return normalized;
+    }
+
+    private Integer resolveSourceIndex(List<Integer> positionToSource, Integer positionIndex) {
+        if (positionIndex == null || !isValidPosition(positionToSource, positionIndex)) {
+            return null;
+        }
+        Integer sourceIndex = positionToSource.get(positionIndex);
+        if (sourceIndex == null || sourceIndex < 0 || sourceIndex >= sourceStatementCount) {
+            return null;
+        }
+        return sourceIndex;
+    }
+
+    private boolean requiresDonorStatement(Edit.Type type) {
+        return type == Edit.Type.INSERT || type == Edit.Type.SWAP || type == Edit.Type.REPLACE_EXPR;
+    }
+
+    private boolean isValidPosition(List<Integer> positionToSource, int positionIndex) {
+        return positionIndex >= 0 && positionIndex < positionToSource.size();
+    }
+
+    private void removeAt(List<Integer> positionToSource, int positionIndex) {
+        if (isValidPosition(positionToSource, positionIndex)) {
+            positionToSource.remove(positionIndex);
+        }
+    }
+
+    private void swapAt(List<Integer> positionToSource, int first, Integer second) {
+        if (second == null || !isValidPosition(positionToSource, first) || !isValidPosition(positionToSource, second)) {
+            return;
+        }
+        Integer tmp = positionToSource.get(first);
+        positionToSource.set(first, positionToSource.get(second));
+        positionToSource.set(second, tmp);
     }
 
     private int countMutableStatements(String sourceCode) {
