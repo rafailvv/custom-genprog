@@ -98,6 +98,7 @@ public class FitnessEvaluator {
                     options.add(systemClasspath);
                 }
 
+                // Candidate compilation failures are expected during search; keep evaluator output quiet.
                 PrintWriter silentOutput = new PrintWriter(new StringWriter());
                 JavaCompiler.CompilationTask task = compiler.getTask(
                     silentOutput, fileManager, null, options, null,
@@ -176,6 +177,7 @@ public class FitnessEvaluator {
             List<File> sourceFiles = new ArrayList<>();
             sourceFiles.add(sourceFile);
             
+            // Suppress javac diagnostics for transient mutants to avoid log flooding.
             PrintWriter silentOutput = new PrintWriter(new StringWriter());
             JavaCompiler.CompilationTask sourceTask = compiler.getTask(
                 silentOutput, fileManager, null, null, null,

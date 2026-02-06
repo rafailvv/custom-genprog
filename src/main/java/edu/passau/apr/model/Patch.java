@@ -558,6 +558,7 @@ public class Patch {
     }
 
     private boolean isReplaceableExpression(Expression expression) {
+        // Keep REPLACE_EXPR in a type-stable subset; raw names/literals cause many uncompilable swaps.
         if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
             return false;
         }
@@ -586,6 +587,7 @@ public class Patch {
     }
 
     private boolean isNegatableExpression(Expression expression) {
+        // NEGATE_EXPRESSION is intentionally scoped to conditional branches only.
         if (expression.isLambdaExpr() || expression.isLiteralExpr()) {
             return false;
         }
@@ -670,6 +672,7 @@ public class Patch {
     }
 
     private boolean areCompatibleForReplacement(Expression targetExpression, Expression donorExpression) {
+        // Prefer same AST kinds; only allow a few broad but safe cross-kind replacements.
         if (targetExpression.getClass().equals(donorExpression.getClass())) {
             return true;
         }

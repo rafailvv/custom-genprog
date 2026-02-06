@@ -329,6 +329,7 @@ public class PatchGenerator {
                                        List<Edit> deletes,
                                        List<Edit> inserts,
                                        List<Edit> swaps) {
+        // Interleave operator pools so destructive edits do not dominate the initial population.
         List<EditPoolCursor> cursors = new ArrayList<>();
         cursors.add(new EditPoolCursor(binaries, MAX_BINARY_SEEDS));
         cursors.add(new EditPoolCursor(replaces, MAX_REPLACE_SEEDS));
@@ -411,6 +412,7 @@ public class PatchGenerator {
     }
 
     private boolean isReplaceableExpression(Expression expression) {
+        // Mirror Patch-side filtering to keep seed edits valid after application.
         if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
             return false;
         }
@@ -501,6 +503,7 @@ public class PatchGenerator {
     private List<Integer> prioritizedReplaceDonors(int targetIndex,
                                                    List<Integer> donorIndices,
                                                    List<Statement> statements) {
+        // Prefer donors from the same method to preserve local variable/type context.
         List<Integer> candidates = new ArrayList<>(donorIndices);
         if (!candidates.contains(targetIndex)) {
             candidates.add(targetIndex);
