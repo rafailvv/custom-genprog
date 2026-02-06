@@ -69,10 +69,10 @@ public class GeneticAlgorithm {
             List<FitnessResult> viFit = new ArrayList<>();
             List<Patch> elitePatches  = new ArrayList<>();
 
-            // Collect viable patches (where at least one test passes)
-            // Viable ← { (P, PathP) in Popul | f(P) > 0 }
+            // Collect viable patches according to GenProg pseudocode:
+            // Viable ← { (P, PathP) in Popul | f(P) > 0 }.
             for (int i = 0; i < population.size(); i++) {
-                if (fitnesses.get(i).passingTests() > 0) {
+                if (fitnesses.get(i).fitness() > 0.0) {
                     viablePatches.add(population.get(i));
                     viFit.add(fitnesses.get(i));
                 }
