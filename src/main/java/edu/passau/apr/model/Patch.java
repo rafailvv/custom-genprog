@@ -14,7 +14,6 @@ import com.github.javaparser.ast.stmt.Statement;
 import edu.passau.apr.util.AstUtils;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -33,10 +32,8 @@ import static edu.passau.apr.model.Edit.Type.SWAP;
 public class Patch {
     private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
     private static final int MAX_EDITS_PER_PATCH = 3;
-    private static final double TARGET_EXPLORATION_PROBABILITY = 0.20;
-    private static final double UNKNOWN_SUSPICIOUSNESS = 0.0;
-    private static final double MIN_SELECTION_WEIGHT = 0.01;
-    private static final int STATEMENT_WEIGHT_NEIGHBORHOOD = 2;
+    private static final double UNKNOWN_SUSPICIOUSNESS = 0.1;
+    private static final double MIN_SUSPICIOUSNESS = 0.1;
 
     private final CompilationUnit compilationUnit;
     private final Map<Integer, Double> suspiciousness;
@@ -75,7 +72,7 @@ public class Patch {
                 break;
             }
 
-            double weight = mutationProbabilityWeight(originalStatement);
+            double weight = getSuspiciousness(originalStatement);
             if (weight <= 0.0) {
                 continue;
             }
@@ -140,9 +137,17 @@ public class Patch {
         return patchCopy;
     }
 
-    private double mutationProbabilityWeight(Statement statement) {
-        // Keep GenProg semantics: mutate statement I_j with probability W(I_j).
-        return Math.max(0.0, Math.min(1.0, getStatementSuspiciousness(statement)));
+    private double getSuspiciousness(Statement statement) {
+        // Get suspiciousness weight at the line number of the statement.
+        // For multiline statements, the first line is chosen as this should have the highest suspiciousness value and
+        // is definitely run.
+        int line = statement.getBegin().map(position -> position.line).orElse(-1);
+        var value = suspiciousness.getOrDefault(line, UNKNOWN_SUSPICIOUSNESS);
+        if (value == 0) {
+            // Do not assume perfect fault localization
+            return MIN_SUSPICIOUSNESS;
+        }
+        return value;
     }
 
     private Edit createRandomEdit(int targetStatementIndex, Random random) {
@@ -456,9 +461,6 @@ public class Patch {
                 if (operation == SWAP && i == targetIndex) {
                     continue;
                 }
-                if (operation == SWAP && mutationProbabilityWeight(statements.get(i)) <= 0.0) {
-                    continue;
-                }
                 donors.add(i);
             }
             if (donors.isEmpty()) {
@@ -550,56 +552,12 @@ public class Patch {
         return null;
     }
 
-    private double getStatementSuspiciousness(Statement statement) {
-        if (suspiciousness == null || suspiciousness.isEmpty()) {
-            return UNKNOWN_SUSPICIOUSNESS;
-        }
-
-        double exact = getExactStatementSuspiciousness(statement);
-        if (exact > 0.0) {
-            return exact;
-        }
-        if (hasExactPositiveStatementWeight) {
-            return MIN_SELECTION_WEIGHT * TARGET_EXPLORATION_PROBABILITY;
-        }
-
-        if (statement.getRange().isPresent()) {
-            Range range = statement.getRange().get();
-            if (range.begin.line >= 0 && range.end.line >= range.begin.line) {
-                int from = Math.max(1, range.begin.line - STATEMENT_WEIGHT_NEIGHBORHOOD);
-                int to = range.end.line + STATEMENT_WEIGHT_NEIGHBORHOOD;
-                double neighborhoodMax = 0.0;
-                for (int line = from; line <= to; line++) {
-                    neighborhoodMax = Math.max(neighborhoodMax, suspiciousness.getOrDefault(line, 0.0));
-                }
-                if (neighborhoodMax > 0.0) {
-                    return neighborhoodMax;
-                }
-            }
-        }
-
-        int beginLine = statement.getBegin().map(position -> position.line).orElse(-1);
-        if (beginLine >= 0) {
-            int from = Math.max(1, beginLine - STATEMENT_WEIGHT_NEIGHBORHOOD);
-            int to = beginLine + STATEMENT_WEIGHT_NEIGHBORHOOD;
-            double neighborhoodMax = 0.0;
-            for (int line = from; line <= to; line++) {
-                neighborhoodMax = Math.max(neighborhoodMax, suspiciousness.getOrDefault(line, 0.0));
-            }
-            if (neighborhoodMax > 0.0) {
-                return neighborhoodMax;
-            }
-        }
-
-        return UNKNOWN_SUSPICIOUSNESS;
-    }
-
     private boolean isMutableTargetIndex(int index) {
         Statement statement = getMutableStatementAt(index);
         if (statement == null) {
             return false;
         }
-        return mutationProbabilityWeight(statement) > 0.0;
+        return getSuspiciousness(statement) > 0.0;
     }
 
     private boolean computeHasExactPositiveStatementWeight() {
