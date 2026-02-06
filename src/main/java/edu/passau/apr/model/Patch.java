@@ -14,6 +14,7 @@ import com.github.javaparser.ast.stmt.Statement;
 import edu.passau.apr.util.AstUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -32,24 +33,20 @@ import static edu.passau.apr.model.Edit.Type.SWAP;
 public class Patch {
     private static final Range INVALID_RANGE = new Range(new Position(-1, -1), new Position(-1, -1));
     private static final int MAX_EDITS_PER_PATCH = 3;
-    private static final double UNKNOWN_SUSPICIOUSNESS = 0.1;
-    private static final double MIN_SUSPICIOUSNESS = 0.1;
+    private static final double UNKNOWN_SUSPICIOUSNESS = 0.0;
 
     private final CompilationUnit compilationUnit;
     private final Map<Integer, Double> suspiciousness;
-    private final boolean hasExactPositiveStatementWeight;
     private final List<Edit> edits = new ArrayList<>();
 
     public Patch(CompilationUnit cu, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = cu;
         this.suspiciousness = nodeWeights;
-        this.hasExactPositiveStatementWeight = computeHasExactPositiveStatementWeight();
     }
 
     public Patch(String source, Map<Integer, Double> nodeWeights) {
         this.compilationUnit = StaticJavaParser.parse(source);
         this.suspiciousness = nodeWeights;
-        this.hasExactPositiveStatementWeight = computeHasExactPositiveStatementWeight();
     }
 
     public void doMutations(double mutationRate, Random random) {
@@ -72,7 +69,7 @@ public class Patch {
                 break;
             }
 
-            double weight = getSuspiciousness(originalStatement);
+            double weight = mutationProbabilityWeight(originalStatement);
             if (weight <= 0.0) {
                 continue;
             }
@@ -137,17 +134,9 @@ public class Patch {
         return patchCopy;
     }
 
-    private double getSuspiciousness(Statement statement) {
-        // Get suspiciousness weight at the line number of the statement.
-        // For multiline statements, the first line is chosen as this should have the highest suspiciousness value and
-        // is definitely run.
-        int line = statement.getBegin().map(position -> position.line).orElse(-1);
-        var value = suspiciousness.getOrDefault(line, UNKNOWN_SUSPICIOUSNESS);
-        if (value == 0) {
-            // Do not assume perfect fault localization
-            return MIN_SUSPICIOUSNESS;
-        }
-        return value;
+    private double mutationProbabilityWeight(Statement statement) {
+        // Keep GenProg semantics: mutate statement I_j with probability W(I_j).
+        return Math.max(0.0, Math.min(1.0, getStatementSuspiciousness(statement)));
     }
 
     private Edit createRandomEdit(int targetStatementIndex, Random random) {
@@ -461,6 +450,9 @@ public class Patch {
                 if (operation == SWAP && i == targetIndex) {
                     continue;
                 }
+                if (operation == SWAP && mutationProbabilityWeight(statements.get(i)) <= 0.0) {
+                    continue;
+                }
                 donors.add(i);
             }
             if (donors.isEmpty()) {
@@ -552,24 +544,19 @@ public class Patch {
         return null;
     }
 
+    private double getStatementSuspiciousness(Statement statement) {
+        if (suspiciousness == null || suspiciousness.isEmpty()) {
+            return UNKNOWN_SUSPICIOUSNESS;
+        }
+        return getExactStatementSuspiciousness(statement);
+    }
+
     private boolean isMutableTargetIndex(int index) {
         Statement statement = getMutableStatementAt(index);
         if (statement == null) {
             return false;
         }
-        return getSuspiciousness(statement) > 0.0;
-    }
-
-    private boolean computeHasExactPositiveStatementWeight() {
-        if (suspiciousness == null || suspiciousness.isEmpty()) {
-            return false;
-        }
-        for (Statement statement : getMutableStatements()) {
-            if (getExactStatementSuspiciousness(statement) > 0.0) {
-                return true;
-            }
-        }
-        return false;
+        return mutationProbabilityWeight(statement) > 0.0;
     }
 
     private double getExactStatementSuspiciousness(Statement statement) {

@@ -23,8 +23,6 @@ import java.util.Set;
  * Generates initial candidates and crossover offspring for the genetic search.
  */
 public class PatchGenerator {
-    private static final int STATEMENT_WEIGHT_NEIGHBORHOOD = 2;
-    private static final double EXPLORATION_SUSPICIOUSNESS = 0.002;
     private static final int MAX_TARGET_STATEMENTS = 32;
     private static final int MAX_DONOR_STATEMENTS = 128;
     private static final int MAX_INSERT_DONORS_PER_TARGET = 4;
@@ -50,7 +48,6 @@ public class PatchGenerator {
     private final double mutationWeight;
     private final Map<Integer, Double> weights;
     private final int sourceStatementCount;
-    private final boolean hasExactPositiveStatementWeight;
 
     public PatchGenerator(String source, Map<Integer, Double> weights, double mutationWeight, Random random) {
         this.random = random;
@@ -58,7 +55,6 @@ public class PatchGenerator {
         this.mutationWeight = mutationWeight;
         this.weights = weights;
         this.sourceStatementCount = countMutableStatements(source);
-        this.hasExactPositiveStatementWeight = computeHasExactPositiveStatementWeight();
     }
 
     /**
@@ -710,47 +706,11 @@ public class PatchGenerator {
         }
 
         double exact = exactStatementSuspiciousness(statement);
-        if (exact > 0.0) {
-            return exact;
-        }
-        if (hasExactPositiveStatementWeight) {
-            return EXPLORATION_SUSPICIOUSNESS;
-        }
-
-        if (statement.getRange().isPresent()) {
-            var range = statement.getRange().get();
-            int from = Math.max(1, range.begin.line - STATEMENT_WEIGHT_NEIGHBORHOOD);
-            int to = range.end.line + STATEMENT_WEIGHT_NEIGHBORHOOD;
-            double maxWeight = 0.0;
-            for (int line = from; line <= to; line++) {
-                maxWeight = Math.max(maxWeight, weights.getOrDefault(line, 0.0));
-            }
-            if (maxWeight > 0.0) {
-                return maxWeight;
-            }
-        }
-        int line = statement.getBegin().map(position -> position.line).orElse(-1);
-        if (line >= 0) {
-            int from = Math.max(1, line - STATEMENT_WEIGHT_NEIGHBORHOOD);
-            int to = line + STATEMENT_WEIGHT_NEIGHBORHOOD;
-            double maxWeight = 0.0;
-            for (int current = from; current <= to; current++) {
-                maxWeight = Math.max(maxWeight, weights.getOrDefault(current, 0.0));
-            }
-            return maxWeight;
-        }
-        return 0.0;
+        return exact;
     }
 
     private boolean isPrimarySuspiciousStatement(Statement statement) {
-        double score = statementSuspiciousness(statement);
-        if (score <= 0.0) {
-            return false;
-        }
-        if (hasExactPositiveStatementWeight) {
-            return score > EXPLORATION_SUSPICIOUSNESS;
-        }
-        return true;
+        return statementSuspiciousness(statement) > 0.0;
     }
 
     /**
@@ -953,18 +913,6 @@ public class PatchGenerator {
         } catch (Exception e) {
             return 0;
         }
-    }
-
-    private boolean computeHasExactPositiveStatementWeight() {
-        if (weights == null || weights.isEmpty()) {
-            return false;
-        }
-        for (Statement statement : mutableStatements()) {
-            if (exactStatementSuspiciousness(statement) > 0.0) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private double exactStatementSuspiciousness(Statement statement) {

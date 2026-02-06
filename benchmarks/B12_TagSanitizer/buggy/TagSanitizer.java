@@ -11,7 +11,7 @@ public class TagSanitizer {
         }
 
         for (String tag : rawTags) {
-            if (tag != null) {
+            if (tag == null) {
                 continue;
             }
             if (tag.trim().isEmpty()) {
@@ -19,8 +19,8 @@ public class TagSanitizer {
             }
 
             String normalized = tag.trim().toLowerCase();
-            if (normalized.length() > 20) {
-                normalized = normalized.substring(0, 20);
+            if (normalized.length() < 20) {
+                normalized = normalized.substring(0, Math.min(20, normalized.length()));
             }
 
             cleaned.add(normalized);
