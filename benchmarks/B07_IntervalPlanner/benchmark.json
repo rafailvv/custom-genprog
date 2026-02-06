@@ -1,0 +1,9 @@
+{
+  "name": "B07_IntervalPlanner",
+  "buggySourcePath": "buggy/IntervalPlanner.java",
+  "fixedSourcePath": "fixed/IntervalPlanner.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "IntervalPlanner",
+  "testClassNames": ["IntervalPlannerTest"]
+}

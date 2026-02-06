@@ -13,6 +13,9 @@ BENCHMARKS=(
   "B03_MissingStatement"
   "B04_WrongPredicates"
   "B05_WrongIndex"
+  "B06_InventoryNormalization"
+  "B07_IntervalPlanner"
+  "B08_LogReportBuilder"
 )
 
 echo "=== Quick APR Benchmark Sweep ==="

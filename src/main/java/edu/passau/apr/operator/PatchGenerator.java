@@ -2,6 +2,7 @@ package edu.passau.apr.operator;
 
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.CallableDeclaration;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.stmt.Statement;
@@ -21,22 +22,24 @@ import java.util.Set;
  * Generates initial candidates and crossover offspring for the genetic search.
  */
 public class PatchGenerator {
-    private static final int MAX_TARGET_STATEMENTS = 8;
-    private static final int MAX_DONOR_STATEMENTS = 10;
+    private static final int MAX_TARGET_STATEMENTS = 12;
+    private static final int MAX_DONOR_STATEMENTS = 24;
     private static final int MAX_INSERT_DONORS_PER_TARGET = 4;
     private static final int MAX_SWAP_DONORS_PER_TARGET = 4;
     private static final int MAX_REPLACE_EXPRESSION_INDICES = 6;
-    private static final int MAX_REPLACE_EDITS_PER_PAIR = 3;
+    private static final int MAX_NEGATE_EXPRESSION_INDICES = 24;
+    private static final int MAX_REPLACE_EDITS_PER_PAIR = 4;
     private static final int MAX_BINARY_EXPRESSION_INDICES = 6;
     private static final int MAX_BINARY_EDITS_PER_STATEMENT = 6;
-    private static final int MAX_SINGLE_EDIT_POOL = 80;
-    private static final int MAX_COMBINATION_POOL = 20;
+    private static final int MAX_SINGLE_EDIT_POOL = 96;
+    private static final int MAX_COMBINATION_POOL = 24;
     private static final int MAX_TWO_EDIT_ATTEMPTS = 120;
-    private static final double SINGLE_EDIT_RATIO = 0.70;
-    private static final int MAX_REPLACE_SEEDS = 40;
+    private static final double SINGLE_EDIT_RATIO = 0.75;
+    private static final int MAX_REPLACE_SEEDS = 30;
     private static final int MAX_BINARY_SEEDS = 24;
-    private static final int MAX_INSERT_SEEDS = 24;
-    private static final int MAX_SWAP_SEEDS = 16;
+    private static final int MAX_NEGATE_SEEDS = 16;
+    private static final int MAX_INSERT_SEEDS = 16;
+    private static final int MAX_SWAP_SEEDS = 12;
 
     private final Random random;
     private final String source;
@@ -113,6 +116,7 @@ public class PatchGenerator {
         List<Edit> deletes = new ArrayList<>();
         List<Edit> replaces = new ArrayList<>();
         List<Edit> binaries = new ArrayList<>();
+        List<Edit> negates = new ArrayList<>();
         List<Edit> inserts = new ArrayList<>();
         List<Edit> swaps = new ArrayList<>();
         Set<String> seenEdits = new HashSet<>();
@@ -146,10 +150,7 @@ public class PatchGenerator {
                 continue;
             }
 
-            List<Integer> candidateDonors = new ArrayList<>(donorIndices);
-            if (!candidateDonors.contains(targetIndex)) {
-                candidateDonors.add(targetIndex);
-            }
+            List<Integer> candidateDonors = prioritizedReplaceDonors(targetIndex, donorIndices, statements);
 
             for (Integer donorIndex : candidateDonors) {
                 Statement donorStatement = statements.get(donorIndex);
@@ -221,12 +222,26 @@ public class PatchGenerator {
             }
         }
 
-        List<Edit> edits = new ArrayList<>();
-        appendLimited(edits, deletes, MAX_SINGLE_EDIT_POOL);
-        appendLimited(edits, replaces, MAX_REPLACE_SEEDS);
-        appendLimited(edits, binaries, MAX_BINARY_SEEDS);
-        appendLimited(edits, inserts, MAX_INSERT_SEEDS);
-        appendLimited(edits, swaps, MAX_SWAP_SEEDS);
+        for (Integer targetIndex : targetIndices) {
+            Statement targetStatement = statements.get(targetIndex);
+            List<Integer> targetExpressionIndices = prioritizedNegatableExpressionIndices(
+                targetStatement,
+                MAX_NEGATE_EXPRESSION_INDICES
+            );
+            for (Integer targetExprIndex : targetExpressionIndices) {
+                Edit negateEdit = new Edit(Edit.Type.NEGATE_EXPRESSION, targetIndex, null, targetExprIndex, null);
+                addIfApplicable(negates, seenEdits, negateEdit);
+            }
+        }
+
+        List<Edit> edits = roundRobinMerge(
+            binaries,
+            replaces,
+            negates,
+            deletes,
+            inserts,
+            swaps
+        );
 
         if (edits.size() > MAX_SINGLE_EDIT_POOL) {
             return new ArrayList<>(edits.subList(0, MAX_SINGLE_EDIT_POOL));
@@ -308,15 +323,38 @@ public class PatchGenerator {
             + ":" + edit.donorExpressionIndex();
     }
 
-    private void appendLimited(List<Edit> target, List<Edit> source, int maxToAdd) {
-        int added = 0;
-        for (Edit edit : source) {
-            if (target.size() >= MAX_SINGLE_EDIT_POOL || added >= maxToAdd) {
+    private List<Edit> roundRobinMerge(List<Edit> binaries,
+                                       List<Edit> replaces,
+                                       List<Edit> negates,
+                                       List<Edit> deletes,
+                                       List<Edit> inserts,
+                                       List<Edit> swaps) {
+        List<EditPoolCursor> cursors = new ArrayList<>();
+        cursors.add(new EditPoolCursor(binaries, MAX_BINARY_SEEDS));
+        cursors.add(new EditPoolCursor(replaces, MAX_REPLACE_SEEDS));
+        cursors.add(new EditPoolCursor(negates, MAX_NEGATE_SEEDS));
+        cursors.add(new EditPoolCursor(deletes, MAX_SINGLE_EDIT_POOL));
+        cursors.add(new EditPoolCursor(inserts, MAX_INSERT_SEEDS));
+        cursors.add(new EditPoolCursor(swaps, MAX_SWAP_SEEDS));
+
+        List<Edit> merged = new ArrayList<>();
+        while (merged.size() < MAX_SINGLE_EDIT_POOL) {
+            boolean addedInRound = false;
+            for (EditPoolCursor cursor : cursors) {
+                if (merged.size() >= MAX_SINGLE_EDIT_POOL) {
+                    break;
+                }
+                Edit next = cursor.next();
+                if (next != null) {
+                    merged.add(next);
+                    addedInRound = true;
+                }
+            }
+            if (!addedInRound) {
                 break;
             }
-            target.add(edit);
-            added++;
         }
+        return merged;
     }
 
     private List<Integer> prioritizedExpressionIndices(Statement statement, int limit) {
@@ -347,17 +385,103 @@ public class PatchGenerator {
         return indices;
     }
 
+    private List<Integer> prioritizedNegatableExpressionIndices(Statement statement, int limit) {
+        List<Expression> expressions = getNegatableExpressions(statement);
+        List<Integer> indices = new ArrayList<>();
+        for (int i = 0; i < expressions.size(); i++) {
+            indices.add(i);
+        }
+        indices.sort(Comparator.comparingDouble((Integer i) -> expressionPriority(expressions.get(i))).reversed());
+        if (indices.size() > limit) {
+            return new ArrayList<>(indices.subList(0, limit));
+        }
+        return indices;
+    }
+
     private List<Expression> getReplaceableExpressions(Statement statement) {
         return statement.findAll(Expression.class).stream()
             .filter(this::isReplaceableExpression)
             .toList();
     }
 
+    private List<Expression> getNegatableExpressions(Statement statement) {
+        return statement.findAll(Expression.class).stream()
+            .filter(this::isNegatableExpression)
+            .toList();
+    }
+
     private boolean isReplaceableExpression(Expression expression) {
-        return !expression.isLiteralExpr() && !expression.isLambdaExpr();
+        if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
+            return false;
+        }
+        if (expression.isNameExpr() || expression.isThisExpr() || expression.isSuperExpr()) {
+            return false;
+        }
+        if (expression.isAnnotationExpr() || expression.isTypeExpr() || expression.isClassExpr()) {
+            return false;
+        }
+        if (expression.isMethodReferenceExpr() || expression.isArrayInitializerExpr()) {
+            return false;
+        }
+        if (expression.isAssignExpr() || expression.isVariableDeclarationExpr()) {
+            return false;
+        }
+
+        return expression.isMethodCallExpr()
+            || expression.isFieldAccessExpr()
+            || expression.isArrayAccessExpr()
+            || expression.isBinaryExpr()
+            || expression.isUnaryExpr()
+            || expression.isEnclosedExpr()
+            || expression.isCastExpr()
+            || expression.isConditionalExpr()
+            || expression.isInstanceOfExpr();
+    }
+
+    private boolean isNegatableExpression(Expression expression) {
+        if (expression.isLambdaExpr() || expression.isLiteralExpr()) {
+            return false;
+        }
+        if (expression.isAssignExpr() || expression.isConditionalExpr()) {
+            return false;
+        }
+        if (expression.isArrayInitializerExpr() || expression.isObjectCreationExpr()) {
+            return false;
+        }
+        if (expression.isMethodReferenceExpr()) {
+            return false;
+        }
+        if (expression.isClassExpr() || expression.isTypeExpr()) {
+            return false;
+        }
+        if (expression.getParentNode().isEmpty()
+            || !(expression.getParentNode().get() instanceof com.github.javaparser.ast.expr.ConditionalExpr conditional)) {
+            return false;
+        }
+        boolean isConditionalBranch = conditional.getThenExpr() == expression || conditional.getElseExpr() == expression;
+        if (!isConditionalBranch) {
+            return false;
+        }
+
+        return expression.isNameExpr()
+            || expression.isFieldAccessExpr()
+            || expression.isArrayAccessExpr()
+            || expression.isMethodCallExpr()
+            || expression.isEnclosedExpr()
+            || expression.isCastExpr()
+            || expression.isUnaryExpr()
+            || expression.isBinaryExpr();
     }
 
     private double expressionPriority(Expression expression) {
+        if (expression.getParentNode().isPresent()
+            && expression.getParentNode().get() instanceof com.github.javaparser.ast.expr.ConditionalExpr conditional
+            && (conditional.getThenExpr() == expression || conditional.getElseExpr() == expression)) {
+            return 3.6;
+        }
+        if (expression.isFieldAccessExpr()) {
+            return 2.4;
+        }
         if (expression.isArrayAccessExpr()) {
             return 2.8;
         }
@@ -369,9 +493,31 @@ public class PatchGenerator {
             };
         }
         if (expression.isMethodCallExpr()) {
-            return 2.0;
+            return 2.6;
         }
         return 1.0;
+    }
+
+    private List<Integer> prioritizedReplaceDonors(int targetIndex,
+                                                   List<Integer> donorIndices,
+                                                   List<Statement> statements) {
+        List<Integer> candidates = new ArrayList<>(donorIndices);
+        if (!candidates.contains(targetIndex)) {
+            candidates.add(targetIndex);
+        }
+
+        Statement target = statements.get(targetIndex);
+        List<Integer> sameCallable = new ArrayList<>();
+        List<Integer> others = new ArrayList<>();
+        for (Integer donorIndex : candidates) {
+            if (isSameEnclosingCallable(target, statements.get(donorIndex))) {
+                sameCallable.add(donorIndex);
+            } else {
+                others.add(donorIndex);
+            }
+        }
+        sameCallable.addAll(others);
+        return sameCallable;
     }
 
     private List<BinaryExpr.Operator> candidateOperators(BinaryExpr.Operator operator) {
@@ -513,6 +659,35 @@ public class PatchGenerator {
                 .count();
         } catch (Exception e) {
             return 0;
+        }
+    }
+
+    private boolean isSameEnclosingCallable(Statement left, Statement right) {
+        var leftCallable = left.findAncestor(CallableDeclaration.class).orElse(null);
+        var rightCallable = right.findAncestor(CallableDeclaration.class).orElse(null);
+        return leftCallable != null && leftCallable == rightCallable;
+    }
+
+    private static final class EditPoolCursor {
+        private final List<Edit> edits;
+        private final int limit;
+        private int consumed;
+        private int produced;
+
+        private EditPoolCursor(List<Edit> edits, int limit) {
+            this.edits = edits;
+            this.limit = Math.max(0, limit);
+            this.consumed = 0;
+            this.produced = 0;
+        }
+
+        private Edit next() {
+            if (produced >= limit || consumed >= edits.size()) {
+                return null;
+            }
+            Edit edit = edits.get(consumed++);
+            produced++;
+            return edit;
         }
     }
 }

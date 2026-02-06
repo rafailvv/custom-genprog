@@ -5,8 +5,10 @@ import com.github.javaparser.Range;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.body.CallableDeclaration;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.UnaryExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.Statement;
 
@@ -18,6 +20,7 @@ import java.util.Random;
 import static edu.passau.apr.model.Edit.Type.DELETE;
 import static edu.passau.apr.model.Edit.Type.INSERT;
 import static edu.passau.apr.model.Edit.Type.MUTATE_BINARY_OPERATOR;
+import static edu.passau.apr.model.Edit.Type.NEGATE_EXPRESSION;
 import static edu.passau.apr.model.Edit.Type.REPLACE_EXPR;
 import static edu.passau.apr.model.Edit.Type.SWAP;
 
@@ -79,13 +82,19 @@ public class Patch {
             return false;
         }
 
-        return switch (edit.type()) {
-            case DELETE -> applyDelete(edit);
-            case INSERT -> applyInsert(edit);
-            case SWAP -> applySwap(edit);
-            case REPLACE_EXPR -> applyReplaceExpression(edit);
-            case MUTATE_BINARY_OPERATOR -> applyBinaryOperatorMutation(edit);
-        };
+        try {
+            return switch (edit.type()) {
+                case DELETE -> applyDelete(edit);
+                case INSERT -> applyInsert(edit);
+                case SWAP -> applySwap(edit);
+                case REPLACE_EXPR -> applyReplaceExpression(edit);
+                case MUTATE_BINARY_OPERATOR -> applyBinaryOperatorMutation(edit);
+                case NEGATE_EXPRESSION -> applyNegateExpression(edit);
+            };
+        } catch (RuntimeException ex) {
+            // Reject invalid AST rewrites but keep the search running.
+            return false;
+        }
     }
 
     public void applyEdits(List<Edit> candidateEdits) {
@@ -106,7 +115,7 @@ public class Patch {
 
     private int determineMutationBudget(double mutationRate, Random random) {
         int budget = 1;
-        double boostedMutationRate = Math.min(0.85, Math.max(0.0, mutationRate * 5.0));
+        double boostedMutationRate = Math.min(0.65, Math.max(0.0, mutationRate * 3.0));
         while (budget < MAX_EDITS_PER_MUTATION && random.nextDouble() < boostedMutationRate) {
             budget++;
         }
@@ -127,7 +136,26 @@ public class Patch {
             }
             case REPLACE_EXPR -> createReplaceExpressionEdit(targetStatementIndex, random);
             case MUTATE_BINARY_OPERATOR -> createBinaryOperatorMutationEdit(targetStatementIndex, random);
+            case NEGATE_EXPRESSION -> createNegateExpressionEdit(targetStatementIndex, random);
         };
+    }
+
+    private Edit createNegateExpressionEdit(int targetStatementIndex, Random random) {
+        Statement targetStatement = getMutableStatementAt(targetStatementIndex);
+        if (targetStatement == null) {
+            return null;
+        }
+
+        List<Expression> negatableExpressions = getNegatableExpressions(targetStatement);
+        if (negatableExpressions.isEmpty()) {
+            return null;
+        }
+
+        Integer targetExprIndex = selectExpressionIndex(negatableExpressions, random, true);
+        if (targetExprIndex == null) {
+            return null;
+        }
+        return new Edit(NEGATE_EXPRESSION, targetStatementIndex, null, targetExprIndex, null);
     }
 
     private Edit createBinaryOperatorMutationEdit(int targetStatementIndex, Random random) {
@@ -184,7 +212,7 @@ public class Patch {
         }
 
         Integer targetExprIndex = selectExpressionIndex(targetExpressions, random, true);
-        Integer donorExprIndex = selectExpressionIndex(donorExpressions, random, false);
+        Integer donorExprIndex = selectExpressionIndex(donorExpressions, random, true);
         if (targetExprIndex == null || donorExprIndex == null) {
             return null;
         }
@@ -205,19 +233,22 @@ public class Patch {
 
     private Edit.Type chooseMutationOperation(Random random) {
         double roll = random.nextDouble();
-        if (roll < 0.10) {
+        if (roll < 0.08) {
             return DELETE;
         }
-        if (roll < 0.20) {
+        if (roll < 0.16) {
             return INSERT;
         }
-        if (roll < 0.30) {
+        if (roll < 0.22) {
             return SWAP;
         }
-        if (roll < 0.70) {
+        if (roll < 0.58) {
             return REPLACE_EXPR;
         }
-        return MUTATE_BINARY_OPERATOR;
+        if (roll < 0.88) {
+            return MUTATE_BINARY_OPERATOR;
+        }
+        return NEGATE_EXPRESSION;
     }
 
     private boolean applyDelete(Edit edit) {
@@ -315,6 +346,9 @@ public class Patch {
         if (edit.statementIndex() == donorStatementIndex && targetExpressionIndex.equals(donorExpressionIndex)) {
             return false;
         }
+        if (!areCompatibleForReplacement(targetExpression, donorExpression)) {
+            return false;
+        }
 
         Expression donorClone = donorExpression.clone();
         invalidateRanges(donorClone);
@@ -356,6 +390,37 @@ public class Patch {
         }
 
         binaryExpr.setOperator(newOperator);
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applyNegateExpression(Edit edit) {
+        Integer targetExpressionIndex = edit.targetExpressionIndex();
+        if (targetExpressionIndex == null) {
+            return false;
+        }
+
+        Statement targetStatement = getMutableStatementAt(edit.statementIndex());
+        if (targetStatement == null) {
+            return false;
+        }
+
+        List<Expression> expressions = getNegatableExpressions(targetStatement);
+        if (targetExpressionIndex < 0 || targetExpressionIndex >= expressions.size()) {
+            return false;
+        }
+
+        Expression targetExpression = expressions.get(targetExpressionIndex);
+        Expression replacement;
+
+        if (targetExpression.isUnaryExpr() && targetExpression.asUnaryExpr().getOperator() == UnaryExpr.Operator.MINUS) {
+            replacement = targetExpression.asUnaryExpr().getExpression().clone();
+        } else {
+            replacement = new UnaryExpr(targetExpression.clone(), UnaryExpr.Operator.MINUS);
+        }
+
+        invalidateRanges(replacement);
+        targetExpression.replace(replacement);
         edits.add(edit);
         return true;
     }
@@ -413,6 +478,18 @@ public class Patch {
 
         // For expression replacement we strongly prefer same statement kind, but keep fallback diversity.
         if (operation == REPLACE_EXPR && random.nextDouble() < 0.8) {
+            List<Integer> sameCallable = new ArrayList<>();
+            for (Integer candidate : candidates) {
+                if (isSameEnclosingCallable(target, statements.get(candidate))) {
+                    sameCallable.add(candidate);
+                }
+            }
+            if (!sameCallable.isEmpty()) {
+                candidates = sameCallable;
+            }
+        }
+
+        if (operation == REPLACE_EXPR && random.nextDouble() < 0.7) {
             List<Integer> sameKind = new ArrayList<>();
             for (Integer candidate : candidates) {
                 if (statements.get(candidate).getClass().equals(target.getClass())) {
@@ -474,8 +551,81 @@ public class Patch {
             .toList();
     }
 
+    private List<Expression> getNegatableExpressions(Statement statement) {
+        return statement.findAll(Expression.class).stream()
+            .filter(this::isNegatableExpression)
+            .toList();
+    }
+
     private boolean isReplaceableExpression(Expression expression) {
-        return !expression.isLiteralExpr() && !expression.isLambdaExpr();
+        if (expression.isLiteralExpr() || expression.isLambdaExpr()) {
+            return false;
+        }
+        if (expression.isNameExpr() || expression.isThisExpr() || expression.isSuperExpr()) {
+            return false;
+        }
+        if (expression.isAnnotationExpr() || expression.isTypeExpr() || expression.isClassExpr()) {
+            return false;
+        }
+        if (expression.isMethodReferenceExpr() || expression.isArrayInitializerExpr()) {
+            return false;
+        }
+        if (expression.isAssignExpr() || expression.isVariableDeclarationExpr()) {
+            return false;
+        }
+
+        return expression.isMethodCallExpr()
+            || expression.isFieldAccessExpr()
+            || expression.isArrayAccessExpr()
+            || expression.isBinaryExpr()
+            || expression.isUnaryExpr()
+            || expression.isEnclosedExpr()
+            || expression.isCastExpr()
+            || expression.isConditionalExpr()
+            || expression.isInstanceOfExpr();
+    }
+
+    private boolean isNegatableExpression(Expression expression) {
+        if (expression.isLambdaExpr() || expression.isLiteralExpr()) {
+            return false;
+        }
+        if (expression.isAssignExpr()) {
+            return false;
+        }
+        if (expression.isConditionalExpr()) {
+            return false;
+        }
+        if (expression.isArrayInitializerExpr()) {
+            return false;
+        }
+        if (expression.isObjectCreationExpr()) {
+            return false;
+        }
+        if (expression.isMethodReferenceExpr()) {
+            return false;
+        }
+        if (expression.isClassExpr() || expression.isTypeExpr()) {
+            return false;
+        }
+
+        if (expression.getParentNode().isEmpty()
+            || !(expression.getParentNode().get() instanceof com.github.javaparser.ast.expr.ConditionalExpr conditional)) {
+            return false;
+        }
+
+        boolean isConditionalBranch = conditional.getThenExpr() == expression || conditional.getElseExpr() == expression;
+        if (!isConditionalBranch) {
+            return false;
+        }
+
+        return expression.isNameExpr()
+            || expression.isFieldAccessExpr()
+            || expression.isArrayAccessExpr()
+            || expression.isMethodCallExpr()
+            || expression.isEnclosedExpr()
+            || expression.isCastExpr()
+            || expression.isUnaryExpr()
+            || expression.isBinaryExpr();
     }
 
     private Integer selectExpressionIndex(List<Expression> expressions, Random random, boolean weighted) {
@@ -495,11 +645,19 @@ public class Patch {
     }
 
     private double getExpressionPriority(Expression expression) {
+        if (expression.getParentNode().isPresent()
+            && expression.getParentNode().get() instanceof com.github.javaparser.ast.expr.ConditionalExpr conditional
+            && (conditional.getThenExpr() == expression || conditional.getElseExpr() == expression)) {
+            return 3.6;
+        }
+        if (expression.isFieldAccessExpr()) {
+            return 2.4;
+        }
         if (expression.isArrayAccessExpr()) {
             return 2.5;
         }
         if (expression.isMethodCallExpr()) {
-            return 2.0;
+            return 2.6;
         }
         if (expression.isBinaryExpr()) {
             BinaryExpr binaryExpr = expression.asBinaryExpr();
@@ -509,6 +667,78 @@ public class Patch {
             };
         }
         return 1.0;
+    }
+
+    private boolean areCompatibleForReplacement(Expression targetExpression, Expression donorExpression) {
+        if (targetExpression.getClass().equals(donorExpression.getClass())) {
+            return true;
+        }
+
+        if (targetExpression.isBinaryExpr() && donorExpression.isMethodCallExpr()) {
+            return true;
+        }
+        if (targetExpression.isMethodCallExpr() && donorExpression.isFieldAccessExpr()) {
+            return true;
+        }
+        if (targetExpression.isFieldAccessExpr() && donorExpression.isMethodCallExpr()) {
+            return true;
+        }
+
+        if (isBooleanConditionExpression(targetExpression) && !isLikelyBoolean(donorExpression)) {
+            return false;
+        }
+        if (!isBooleanConditionExpression(targetExpression) && isLikelyBoolean(donorExpression) && !isLikelyBoolean(targetExpression)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean isBooleanConditionExpression(Expression expression) {
+        if (expression.getParentNode().isEmpty()) {
+            return false;
+        }
+        Node parent = expression.getParentNode().get();
+
+        if (parent instanceof com.github.javaparser.ast.stmt.IfStmt ifStmt) {
+            return ifStmt.getCondition() == expression;
+        }
+        if (parent instanceof com.github.javaparser.ast.stmt.WhileStmt whileStmt) {
+            return whileStmt.getCondition() == expression;
+        }
+        if (parent instanceof com.github.javaparser.ast.stmt.DoStmt doStmt) {
+            return doStmt.getCondition() == expression;
+        }
+        if (parent instanceof com.github.javaparser.ast.stmt.ForStmt forStmt) {
+            return forStmt.getCompare().map(compare -> compare == expression).orElse(false);
+        }
+        if (parent instanceof com.github.javaparser.ast.expr.ConditionalExpr conditionalExpr) {
+            return conditionalExpr.getCondition() == expression;
+        }
+        return false;
+    }
+
+    private boolean isLikelyBoolean(Expression expression) {
+        if (expression.isBooleanLiteralExpr()) {
+            return true;
+        }
+        if (expression.isUnaryExpr() && expression.asUnaryExpr().getOperator() == UnaryExpr.Operator.LOGICAL_COMPLEMENT) {
+            return true;
+        }
+        if (expression.isBinaryExpr()) {
+            BinaryExpr.Operator operator = expression.asBinaryExpr().getOperator();
+            return switch (operator) {
+                case OR, AND, EQUALS, NOT_EQUALS, LESS, LESS_EQUALS, GREATER, GREATER_EQUALS -> true;
+                default -> false;
+            };
+        }
+        return expression.isInstanceOfExpr();
+    }
+
+    private boolean isSameEnclosingCallable(Statement left, Statement right) {
+        var leftCallable = left.findAncestor(CallableDeclaration.class).orElse(null);
+        var rightCallable = right.findAncestor(CallableDeclaration.class).orElse(null);
+        return leftCallable != null && leftCallable == rightCallable;
     }
 
     private List<BinaryExpr.Operator> candidateOperators(BinaryExpr.Operator operator) {

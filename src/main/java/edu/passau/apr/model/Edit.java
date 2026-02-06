@@ -19,7 +19,8 @@ public record Edit(Type type, int statementIndex, Integer donorStatementIndex,
         INSERT,
         SWAP,
         REPLACE_EXPR,
-        MUTATE_BINARY_OPERATOR
+        MUTATE_BINARY_OPERATOR,
+        NEGATE_EXPRESSION
     }
 
     @Override
@@ -41,6 +42,14 @@ public record Edit(Type type, int statementIndex, Integer donorStatementIndex,
                 statementIndex,
                 targetExpressionIndex != null ? targetExpressionIndex : "?",
                 donorExpressionIndex != null ? donorExpressionIndex : "?"
+            );
+        }
+        if (type == Type.NEGATE_EXPRESSION) {
+            return String.format(
+                "%s at statement %d (targetExpr=%s)",
+                type,
+                statementIndex,
+                targetExpressionIndex != null ? targetExpressionIndex : "?"
             );
         }
         return String.format(

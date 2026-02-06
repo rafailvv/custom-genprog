@@ -15,6 +15,7 @@ import javax.tools.ToolProvider;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -96,12 +97,14 @@ public class FitnessEvaluator {
                     options.add("-cp");
                     options.add(systemClasspath);
                 }
-                
+
+                PrintWriter silentOutput = new PrintWriter(new StringWriter());
                 JavaCompiler.CompilationTask task = compiler.getTask(
-                    null, fileManager, null, options, null,
+                    silentOutput, fileManager, null, options, null,
                     fileManager.getJavaFileObjectsFromFiles(allFiles)
                 );
                 task.call();
+                silentOutput.close();
             }
             
             fileManager.close();
@@ -173,8 +176,9 @@ public class FitnessEvaluator {
             List<File> sourceFiles = new ArrayList<>();
             sourceFiles.add(sourceFile);
             
+            PrintWriter silentOutput = new PrintWriter(new StringWriter());
             JavaCompiler.CompilationTask sourceTask = compiler.getTask(
-                null, fileManager, null, null, null,
+                silentOutput, fileManager, null, null, null,
                 fileManager.getJavaFileObjectsFromFiles(sourceFiles)
             );
 
@@ -188,6 +192,7 @@ public class FitnessEvaluator {
                 future.cancel(true);
             } catch (Exception ignored) {
             } finally {
+                silentOutput.close();
                 executor.shutdownNow();
             }
             
