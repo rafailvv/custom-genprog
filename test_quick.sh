@@ -19,6 +19,10 @@ BENCHMARKS=(
   "B06_InventoryNormalization"
   "B07_IntervalPlanner"
   "B08_LogReportBuilder"
+  "B09_ShippingTierSwitch"
+  "B10_BillingProration"
+  "B11_ConsecutiveBatcher"
+  "B12_TagSanitizer"
 )
 
 echo "=== Quick APR Benchmark Sweep ==="
