@@ -123,19 +123,21 @@ public class GeneticAlgorithm {
                 ));
             }
 
+            while (newPopulation.size() < populationSize) {
+                newPopulation.add(patchGenerator.generateRandomPatch());
+            }
+
+            if (newPopulation.size() > populationSize) {
+                newPopulation = new ArrayList<>(newPopulation.subList(0, populationSize));
+            }
+
             // mutate all patches in the new population
             newPopulation.forEach(p -> p.doMutations(mutationWeight, random));
 
-            // ensure population size is maintained
-            while (newPopulation.size() + elitePatches.size() < populationSize) {
-                newPopulation.add(patchGenerator.generateRandomPatch());
-            }
-            if (newPopulation.size() + elitePatches.size() > populationSize) {
-                newPopulation = newPopulation.subList(0, populationSize - elitePatches.size());
-            }
-
             // Keep the strongest variants unchanged (elitism) to avoid losing good repairs.
-            newPopulation.addAll(elitePatches);
+            for (int i = 0; i < elitePatches.size() && i < newPopulation.size(); i++) {
+                newPopulation.set(i, elitePatches.get(i).copy());
+            }
 
             population = newPopulation;
             evaluatePopulation();
