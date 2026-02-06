@@ -8,7 +8,11 @@ import com.github.javaparser.ast.stmt.Statement;
  *
  * @param donorStatementIndex For INSERT/REPLACE: the statement to insert/replace with
  */
-public record Edit(Type type, int statementIndex, Integer donorStatementIndex) {
+public record Edit(Type type, int statementIndex, Integer donorStatementIndex,
+                   Integer targetExpressionIndex, Integer donorExpressionIndex) {
+    public Edit(Type type, int statementIndex, Integer donorStatementIndex) {
+        this(type, statementIndex, donorStatementIndex, null, null);
+    }
     public enum Type {
         DELETE,
         INSERT,

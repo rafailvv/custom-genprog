@@ -171,7 +171,7 @@ public class GeneticAlgorithm {
             System.out.println("Evaluating Patch:");
             System.out.println(patch);
             String patchSrc = patch.getCompilationUnit().toString();
-            System.out.println(patchSrc);
+            /*System.out.println(patchSrc);*/
             FitnessResult fitness = fitnessEvaluator.evaluate(patchSrc);
             fitnesses.add(fitness);
             System.out.println("Fitness: " + fitness);

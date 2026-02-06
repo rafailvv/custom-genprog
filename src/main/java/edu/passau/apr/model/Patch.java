@@ -4,6 +4,7 @@ import com.github.javaparser.Position;
 import com.github.javaparser.Range;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.Statement;
 import edu.passau.apr.util.Pair;
@@ -132,5 +133,116 @@ public class Patch {
             sb.append(edit).append("\n");
         }
         return sb.toString();
+    }
+
+
+    public boolean applyEdit(Edit edit) {
+        try {
+            return switch (edit.type()) {
+                case DELETE -> applyDelete(edit);
+                case INSERT -> applyInsert(edit);
+                case SWAP -> applySwap(edit);
+            };
+        } catch (RuntimeException ex) {
+            // Reject invalid AST rewrites but keep the search running.
+            return false;
+        }
+    }
+
+    public void applyEdits(List<Edit> candidateEdits) {
+        for (Edit edit : candidateEdits) {
+            applyEdit(edit);
+        }
+    }
+
+    public List<Edit> getEdits() {
+        return List.copyOf(edits);
+    }
+
+
+
+    private boolean applyDelete(Edit edit) {
+        Statement target = getMutableStatementAt(edit.statementIndex());
+        if (target == null) {
+            return false;
+        }
+        target.remove();
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applyInsert(Edit edit) {
+        Integer donorIndex = edit.donorStatementIndex();
+        if (donorIndex == null) {
+            return false;
+        }
+
+        Statement target = getMutableStatementAt(edit.statementIndex());
+        Statement donor = getMutableStatementAt(donorIndex);
+        if (target == null || donor == null) {
+            return false;
+        }
+
+        if (!(target.getParentNode().orElse(null) instanceof BlockStmt parent)) {
+            return false;
+        }
+
+        Statement donorClone = donor.clone();
+        donorClone.setRange(INVALID_RANGE);
+        parent.getStatements().addBefore(donorClone, target);
+        edits.add(edit);
+        return true;
+    }
+
+    private boolean applySwap(Edit edit) {
+        Integer donorIndex = edit.donorStatementIndex();
+        if (donorIndex == null || donorIndex == edit.statementIndex()) {
+            return false;
+        }
+
+        Statement target = getMutableStatementAt(edit.statementIndex());
+        Statement donor = getMutableStatementAt(donorIndex);
+        if (target == null || donor == null || target == donor) {
+            return false;
+        }
+
+        if (target.isAncestorOf(donor) || donor.isAncestorOf(target)) {
+            return false;
+        }
+
+        Statement donorClone = donor.clone();
+        Statement targetClone = target.clone();
+        invalidateRanges(donorClone);
+        invalidateRanges(targetClone);
+
+        target.replace(donorClone);
+        donor.replace(targetClone);
+        edits.add(edit);
+        return true;
+    }
+
+
+    private void invalidateRanges(Node node) {
+        node.walk(n -> n.setRange(INVALID_RANGE));
+    }
+
+    private Statement getMutableStatementAt(int index) {
+        List<Statement> statements = getMutableStatements();
+        if (index < 0 || index >= statements.size()) {
+            return null;
+        }
+        return statements.get(index);
+    }
+
+    private List<Statement> getMutableStatements() {
+        // Block statements are not directly mutated/swapped in this representation.
+        return compilationUnit.findAll(Statement.class).stream()
+                .filter(statement -> !statement.isBlockStmt())
+                .toList();
+    }
+
+    @Override
+    protected Object clone() throws CloneNotSupportedException {
+        return new Patch(compilationUnit.clone(), suspiciousness);
     }
 }
