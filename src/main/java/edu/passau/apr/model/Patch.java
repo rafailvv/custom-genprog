@@ -468,25 +468,6 @@ public class Patch {
         return true;
     }
 
-    private Integer selectTargetStatementIndex(Random random) {
-        List<Statement> statements = getMutableStatements();
-        if (statements.isEmpty()) {
-            return null;
-        }
-
-        if (random.nextDouble() < TARGET_EXPLORATION_PROBABILITY) {
-            return random.nextInt(statements.size());
-        }
-
-        List<Double> weights = new ArrayList<>(statements.size());
-        for (Statement statement : statements) {
-            double score = Math.max(getStatementSuspiciousness(statement), MIN_SELECTION_WEIGHT);
-            weights.add(score);
-        }
-
-        Integer weightedIndex = chooseWeightedIndex(weights, random);
-        return weightedIndex != null ? weightedIndex : random.nextInt(statements.size());
-    }
 
     private Integer selectDonorStatementIndex(int targetIndex, Edit.Type operation, Random random) {
         List<Statement> statements = getMutableStatements();
