@@ -33,7 +33,7 @@ public class IntervalPlanner {
             return merged;
         }
 
-        int[] current = new int[]{intervals.get(0)[0], intervals.get(0)[1]};
+        int[] current = intervals.get(0);
 
         for (int i = 1; i < intervals.size(); i++) {
             int[] next = intervals.get(i);
