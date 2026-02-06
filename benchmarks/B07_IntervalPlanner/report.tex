@@ -1,0 +1,10 @@
+\subsubsection{Benchmark 7 - Interval Planner} The provided Class is \texttt{IntervalPlanner} class with \texttt{IntervalPlannerTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{normalizeIntervals(List<int[]> raw)} - validates and normalizes interval endpoints (start <= end) and sorts them.
+    \item \texttt{mergeIntervals(List<int[]> raw)} - merges overlapping or adjacent intervals.
+    \texttt{invertWithinRange(...)} - computes free intervals within a day range given busy intervals.
+    \texttt{totalDuration(List<int[]> intervals)} - sums durations of intervals.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The \texttt{mergeIntervals} method builds a \texttt{merged} list but mistakenly returns the original \texttt{intervals} list at the end. The fix is to return \texttt{merged} so that callers receive the merged result.

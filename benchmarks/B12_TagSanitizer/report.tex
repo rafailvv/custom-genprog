@@ -1,0 +1,9 @@
+\subsubsection{Benchmark 12 - Tag Sanitizer} The provided Class is \texttt{TagSanitizer} class with \texttt{TagSanitizerTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{sanitizeTags(List<String> rawTags)} - trims, lower-cases, drops null/empty tags and truncates tags to a maximum length.
+    \item \texttt{uniquePreserveOrder(List<String> tags)} - returns unique tags preserving insertion order.
+    \item \texttt{toCsv(List<String> tags)} - converts the sanitized, unique tags to a comma-separated string.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The truncation logic in \texttt{sanitizeTags} uses the wrong condition: it checks \texttt{if (normalized.length() < 20)} and then attempts to substring to 20 characters, which is incorrect and never truncates long tags. The fix is to check \texttt{if (normalized.length() > 20)} and then call \texttt{normalized = normalized.substring(0, 20);} to enforce the maximum length.

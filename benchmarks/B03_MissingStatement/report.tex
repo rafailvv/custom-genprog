@@ -1,0 +1,8 @@
+\subsubsection{Benchmark 3 - Missing Statement} The provided Class is \texttt{ListStreamUtils} class with \texttt{ListStreamUtilsTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{joinObjectsWithComma(Object... objects)} - joins objects into a single string separated by commas.
+    \item \texttt{joinObjectsTwiceWithComma(Object... objects)} - joins the objects twice separated by commas.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The bug in \texttt{joinObjectsWithComma} is a missing append statement: the code mistakenly calls \texttt{System.out.println("Append here")} instead of appending a comma (e.g. \texttt{result.append(", ")}). Replacing the print call with the proper \texttt{append} fixes the joining behavior.

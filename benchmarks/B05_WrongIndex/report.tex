@@ -1,0 +1,8 @@
+\subsubsection{Benchmark 5 - Wrong Index} The provided Class is \texttt{ArrayIndexUtil} class with \texttt{ArrayIndexUtilTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{getFirstElement(int[] array)} - should return the first element of the array.
+    \item \texttt{getLastElement(int[] array)} - should return the last element of the array.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The implementations are swapped: \texttt{getFirstElement} returns the last element and \texttt{getLastElement} returns the first. Swap the index expressions so the first method returns \texttt{array[0]} and the last method returns \texttt{array[array.length - 1]}.

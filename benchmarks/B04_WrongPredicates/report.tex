@@ -1,0 +1,8 @@
+\subsubsection{Benchmark 4 - Wrong Predicates} The provided Class is \texttt{StreamUtils} class with \texttt{StreamUtilsTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{nonNullStringJoin(List<Object> objects)} - should filter out null elements and join remaining objects into a comma-separated string.
+    \item \texttt{duplicateAndJoin(List<Object> objects)} - duplicates each element and joins them.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The \texttt{nonNullStringJoin} method contains incorrect predicate logic: it returns \texttt{false} when the element is non-null (and also returns false when null), effectively filtering out all elements. Additionally the mapping appends the literal "bug" to each element's string representation. Fix by using a correct filter (e.g. \texttt{obj -> obj != null}) and mapping to the object's \texttt{toString()} without the extra suffix.
