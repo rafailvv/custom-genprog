@@ -158,6 +158,9 @@ public class Patch {
     }
 
     private double computeMaxSuspiciousness(Map<Integer, Double> nodeWeights) {
+        if (nodeWeights == null || nodeWeights.isEmpty()) {
+            return 1.0;
+        }
         double max = 0.0;
         for (Double value : nodeWeights.values()) {
             if (value != null && value > max) {
