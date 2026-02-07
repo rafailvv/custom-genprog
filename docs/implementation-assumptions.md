@@ -1,150 +1,111 @@
 # Implementation Assumptions and Limitations
 
-This document describes the assumptions, simplifications, and limitations of the APR tool implementation.
+This document captures the current assumptions, simplifications, and known limits of the APR implementation in this repository.
 
-## Supported Program Types
+## 1. Scope and Input Model
 
-### Single-File Programs
-- The tool only supports single-file Java programs (one `.java` file per benchmark)
-- No package declarations are required (programs can be in the default package)
-- Programs should be self-contained (no external dependencies beyond standard library)
+### 1.1 Program scope
+- Benchmarks are expected to be single-target repairs: one buggy Java source file plus tests.
+- The repaired class is compiled from patched source each evaluation.
+- Tests are discovered from benchmark test sources and executed against the compiled candidate class.
 
-### Java Language Features
-- Basic Java syntax (classes, methods, variables, control flow)
-- Arrays and basic data structures
-- Standard library classes (String, Integer, etc.)
+### 1.2 Benchmark format assumptions
+- Each benchmark provides `benchmark.json` and `fault-localization.json`.
+- `fault-localization.json` uses per-line suspiciousness values.
+- Current assignment-oriented convention is `1.0`, `0.1`, `0.0`; the loader does not re-normalize weights.
 
-### Not Supported
-- Multi-file programs (multiple classes in separate files)
-- Package declarations (simplification)
-- Complex inheritance hierarchies
-- Generics (may work but not tested)
-- Lambda expressions (may work but not tested)
-- Annotations (beyond @Test for JUnit)
+### 1.3 Java/test assumptions
+- JavaParser-compatible Java syntax is required for the repaired source.
+- Test discovery assumes JUnit-style methods annotated with `@Test`.
+- Package-heavy or multi-module layouts are outside the intended benchmark scope.
 
-## Edit Operations
+## 2. Patch Representation and Operators
 
-### Edit Types
-1. **DELETE**: Removes a line from the source code
-2. **INSERT**: Inserts a donor statement (from another part of the file) at a specific line
-3. **REPLACE**: Replaces a line with a donor statement
+### 2.1 Representation
+- A patch is an ordered edit script over AST statements/expressions (not raw text lines).
+- Mutable statement list excludes `BlockStmt` nodes.
+- Hard limit: at most 3 applied edits per patch (`MAX_EDITS_PER_PATCH = 3`).
 
-### Patch Size Limitation
-- Maximum 3 edits per patch (configurable)
-- This limitation helps ensure patches compile and reduces search space
+### 2.2 Implemented edit operators
+- GenProg core operators: `DELETE`, `INSERT`, `SWAP`.
+- Additional expression-level operators: `REPLACE_EXPR`, `MUTATE_BINARY_OPERATOR`, `NEGATE_EXPRESSION`.
 
-## Fault Localization
+### 2.3 Safety constraints
+- Edit application is guarded by AST compatibility checks and structural validity checks.
+- `SWAP` forbids ancestor/descendant swaps.
+- Expression replacement is constrained by replaceable-expression predicates and compatibility filtering.
+- Invalid AST rewrite attempts are rejected and do not crash the search loop.
 
-### Weight Scheme
-The tool uses a simplified fault localization scheme with three weight levels:
-- **Weight 1.0**: Statements covered only by failing tests
-- **Weight 0.1**: Statements covered by both failing and passing tests
-- **Weight 0.0**: All other statements
+## 3. Fault Localization Usage (Strict Targeting)
 
-### Input Format
-- Fault localization weights are provided in a JSON file (`fault-localization.json`)
-- The file contains an array of objects with `lineNumber` and `weight` fields
-- Weights are used for probabilistic selection of edit locations
+### 3.1 Statement target selection
+- Mutation targets must have suspiciousness `> 0.0`.
+- Statements mapped to `0.0` are not selected as mutation targets.
+- Suspiciousness is read directly from mapped source lines; no normalization step is applied.
 
-### Not Perfect Localization
-- The tool does NOT use perfect fault localization
-- Some statements with weight 0.1 or 0.0 may be selected for edits
-- This makes the search more realistic and less "cheating"
+### 3.2 Donor selection
+- Donor candidates can come from broader statement pools (including statements with suspiciousness `0.0`, subject to operator-specific constraints).
+- For expression replacement, donor ranking favors same enclosing callable and same statement kind.
 
-## Genetic Algorithm
+## 4. Evolutionary Search
 
-### Population
-- Default population size: 40
-- Initial population: Random patches generated using genetic operators
+### 4.1 Population and loop
+- Default population size: `40`.
+- Defaults: `maxGenerations = 50`, `timeLimitSec = 60`, `mutationWeight = 0.06`.
+- The GA uses initialization, evaluation, selection, crossover, mutation, and elitism.
 
-### Selection
-- Tournament selection with tournament size 3
-- Alternative: Stochastic Universal Sampling (not implemented, but could be added)
+### 4.2 Selection and crossover
+- Selection uses tournament selection (`k = 3`) on viable candidates.
+- Crossover rate is fixed at `0.5`.
+- Crossover is one-point over normalized, source-indexed edit scripts, then rebased and replayed on fresh patches.
 
-### Variation Operators
-- **Mutation**: Applied with probability based on `mutationWeight` (default: 0.06)
-- **Crossover**: Applied with probability 0.5 (fixed)
-- Mutation can add or remove edits from a patch
+### 4.3 Mutation policy
+- Mutation follows a GenProg-style weighted loop:
+  - Iterate candidate statements.
+  - Apply mutation only when both checks pass:
+    - Bernoulli(`mutationWeight`)
+    - Bernoulli(`statementSuspiciousness`)
+- Operator choice is biased toward GenProg core edits with a smaller extension window for expression edits.
 
-### Fitness Function
-- Formula: `fitness = WPosT * passingTests - WNegT * failingTests`
-- Default weights:
-  - WPosT (positive test weight): 1.0
-  - WNegT (negative test weight): 10.0
-- Higher fitness is better
-- Patches that don't compile get fitness = -∞
+## 5. Fitness Evaluation
 
-### Termination Conditions
-1. **Success**: Found a patch where all tests pass
-2. **Generation limit**: Reached maximum number of generations (default: 50)
-3. **Time limit**: Exceeded time limit (default: 60 seconds)
+### 5.1 Evaluation pipeline
+- For each candidate:
+  - compile patched source;
+  - run test suite with per-test timeout;
+  - compute fitness from test outcomes.
+- Compile/test runs are isolated through temporary class output and class loading.
 
-## Compilation and Testing
+### 5.2 Fitness score used in code
+- The evaluator partitions tests using baseline buggy behavior:
+  - positive group: tests that pass on buggy;
+  - negative group: tests that fail on buggy.
+- Score is computed as:
+  - `fitness = positiveWeight * passedPositive + negativeWeight * passedNegative`
+- Default weights: `positiveWeight = 1.0`, `negativeWeight = 10.0`.
+- Note: generation logs print global `Passing/Failing` over all executed tests, while the fitness value above is computed from positive/negative partitions.
 
-### Compilation
-- Uses JavaCompiler API (`javax.tools.JavaCompiler`)
-- Compiles modified source code in a temporary directory
-- If compilation fails, the patch is rejected (fitness = -∞)
+### 5.3 Timeouts and failures
+- Candidate evaluation timeout: `30s`.
+- Compilation timeout: `5s`.
+- Per-test timeout: `2s`.
+- Compile/evaluation failures produce a non-viable result (fitness `0.0`, `compiles=false`) and are treated as unsuccessful candidates.
 
-### Test Execution
-- Uses reflection to discover and run JUnit test methods
-- Tests are identified by `@Test` annotation
-- Test results are collected (passing/failing counts)
-- Each test execution uses a fresh classloader
+## 6. Output and Execution Modes
 
-### Limitations
-- Test execution is simplified (doesn't use full JUnit Platform Launcher)
-- May not support all JUnit features (parameterized tests, etc.)
-- Test setup/teardown methods are not explicitly handled
+### 6.1 APR run mode
+- The tool reports generation progress and final result.
+- On success, patched source is saved under `out/<benchmark>/patch_<timestamp>/`.
+- On failure, the best-so-far patch can still be materialized for inspection.
 
-## Patch Minimization
+### 6.2 Test-only mode
+- CLI option `--runTests buggy|fixed` executes compile+test without GA search.
+- This mode is intended for benchmark validation and debugging.
 
-**Not Implemented**: The tool does NOT include a patch minimization step.
-- Once a patch is found that passes all tests, it is returned as-is
-- No attempt is made to reduce the number of edits
-- This is a documented simplification
+## 7. Known Limitations
 
-## Output
-
-### Success Case
-- Prints the patch (list of edits) to console
-- Saves patched source file to `out/<benchmark>/patch_<timestamp>/`
-- Reports generation count and execution time
-
-### Failure Case
-- Reports best fitness found
-- Reports number of generations executed
-- No patch file is saved
-
-## Reproducibility
-
-- Use `--seed` parameter to set random seed
-- Same seed + same benchmark = same search behavior (in theory)
-- In practice, timing and system differences may cause slight variations
-
-## Performance Considerations
-
-- Each fitness evaluation requires compilation and test execution
-- This is expensive, so the tool may be slow for large programs
-- No caching of compilation/test results (could be added as optimization)
-- Temporary files are cleaned up after evaluation
-
-## Known Limitations
-
-1. **Line-based editing**: Less precise than AST-based approaches
-2. **No patch minimization**: Patches may contain unnecessary edits
-3. **Single-file only**: Cannot handle multi-file programs
-4. **Simplified test execution**: May not support all JUnit features
-5. **No dependency management**: Programs must be self-contained
-6. **Limited Java features**: Complex language features may not work
-
-## Future Improvements
-
-Potential enhancements (not implemented):
-- AST-based editing for more precise patches
-- Patch minimization step
-- Multi-file program support
-- Better test execution using JUnit Platform Launcher
-- Caching of compilation/test results
-- Support for more Java language features
-
+1. No patch minimization stage after finding a plausible patch.
+2. Hard patch-size cap (`<= 3` edits) can block fixes requiring longer scripts.
+3. Simplified test execution path (reflection-based) may not cover all advanced JUnit features.
+4. Designed for assignment-style benchmark structure, not general industrial multi-module projects.
+5. Search remains stochastic; identical seeds improve reproducibility but do not guarantee bit-identical timing behavior across environments.
