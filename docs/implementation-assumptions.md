@@ -24,12 +24,6 @@ This document describes the assumptions, simplifications, and limitations of the
 
 ## Edit Operations
 
-### Line-Based Edits
-The tool uses **line-based editing** instead of AST-based editing:
-- Edits are applied at the line level
-- Each line is treated as a single statement
-- This simplification makes the implementation more straightforward but may be less precise than AST-based approaches
-
 ### Edit Types
 1. **DELETE**: Removes a line from the source code
 2. **INSERT**: Inserts a donor statement (from another part of the file) at a specific line
