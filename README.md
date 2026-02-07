@@ -130,9 +130,16 @@ Each benchmark directory contains:
 - `--positiveTestWeight <double>`
 - `--negativeTestWeight <double>`
 - `--mutationWeight <double>`
+- `--runTests <buggy|fixed>` (compile+run tests only)
 - `--verbose`
 
 Defaults are defined in `/Users/rafailvv/Учеба/University of Passau/Program Repair/Task 3/src/main/java/edu/passau/apr/config/Config.java`.
+
+### Run Tests Only (Buggy vs Fixed)
+```bash
+./gradlew run --args="--benchmark benchmarks/B01_OffByOne --runTests buggy" --no-daemon
+./gradlew run --args="--benchmark benchmarks/B01_OffByOne --runTests fixed" --no-daemon
+```
 
 ## 9. Output Layout
 Patched source output:

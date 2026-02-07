@@ -13,6 +13,7 @@ public class Config {
     private double negativeTestWeight;
     private double mutationWeight;
     private boolean verbose;
+    private String runTestsTarget; // "buggy" | "fixed" | null
 
     // Default values
     public static final int DEFAULT_POPULATION_SIZE = 40;
@@ -31,6 +32,7 @@ public class Config {
         this.timeLimitSec = DEFAULT_TIME_LIMIT_SEC;
         this.seed = System.currentTimeMillis();
         this.verbose = false;
+        this.runTestsTarget = null;
     }
 
     public String getBenchmarkPath() {
@@ -104,5 +106,12 @@ public class Config {
     public void setVerbose(boolean verbose) {
         this.verbose = verbose;
     }
-}
 
+    public String getRunTestsTarget() {
+        return runTestsTarget;
+    }
+
+    public void setRunTestsTarget(String runTestsTarget) {
+        this.runTestsTarget = runTestsTarget;
+    }
+}

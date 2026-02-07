@@ -4,6 +4,7 @@ import edu.passau.apr.algorithm.GeneticAlgorithm;
 import edu.passau.apr.config.Config;
 import edu.passau.apr.evaluator.FitnessEvaluator;
 import edu.passau.apr.model.BenchmarkConfig;
+import edu.passau.apr.model.FitnessResult;
 import edu.passau.apr.model.Patch;
 import edu.passau.apr.operator.PatchGenerator;
 import edu.passau.apr.util.BenchmarkLoader;
@@ -60,6 +61,11 @@ public class Main {
                 benchmarkConfig.getMainClassName()
             );
 
+            if (config.getRunTestsTarget() != null) {
+                runTestsOnly(config, benchmarkConfig, fitnessEvaluator);
+                return;
+            }
+
             var ga = new GeneticAlgorithm(
                 config.getPopulationSize(),
                 config.getMaxGenerations(),
@@ -104,6 +110,43 @@ public class Main {
                 e.printStackTrace();
             }
             System.exit(1);
+        }
+    }
+
+    private static void runTestsOnly(Config config, BenchmarkConfig benchmarkConfig, FitnessEvaluator fitnessEvaluator)
+        throws IOException {
+        String target = config.getRunTestsTarget().trim().toLowerCase();
+        String sourcePath;
+        if ("buggy".equals(target)) {
+            sourcePath = benchmarkConfig.getBuggySourcePath();
+        } else if ("fixed".equals(target)) {
+            sourcePath = benchmarkConfig.getFixedSourcePath();
+        } else {
+            throw new IllegalArgumentException("--runTests must be one of: buggy, fixed");
+        }
+
+        Path path = Paths.get(sourcePath);
+        if (!Files.exists(path)) {
+            throw new IllegalArgumentException("Source file does not exist: " + sourcePath);
+        }
+
+        System.out.println("=== Test Execution Only ===");
+        System.out.println("Variant: " + target);
+        System.out.println("Source: " + sourcePath);
+        System.out.println();
+
+        String src = Files.readString(path);
+        FitnessResult result = fitnessEvaluator.evaluate(src);
+        System.out.printf("Compiles: %s%n", result.compiles());
+        System.out.printf("Passing: %d%n", result.passingTests());
+        System.out.printf("Failing: %d%n", result.failingTests());
+        System.out.printf("Total: %d%n", result.totalTests());
+        System.out.printf("AllPass: %s%n", result.allTestsPass());
+        System.out.println();
+
+        fitnessEvaluator.cleanup();
+        if (!result.allTestsPass()) {
+            System.exit(2);
         }
     }
 
@@ -152,6 +195,13 @@ public class Main {
                         config.setMutationWeight(Double.parseDouble(args[++i]));
                     }
                     break;
+                case "--runTests":
+                    if (i + 1 < args.length) {
+                        config.setRunTestsTarget(args[++i]);
+                    } else {
+                        throw new IllegalArgumentException("--runTests requires an argument: buggy|fixed");
+                    }
+                    break;
                 case "--verbose":
                     config.setVerbose(true);
                     break;
@@ -176,6 +226,7 @@ public class Main {
               --positiveTestWeight <w>  Weight for passing tests (default: 1.0)
               --negativeTestWeight <w>  Weight for failing tests (default: 10.0)
               --mutationWeight <w>   Mutation weight (default: 0.06)
+              --runTests <buggy|fixed>  Only compile+run tests for buggy/fixed version
               --verbose              Enable verbose output
             """;
         System.out.println(usage);
