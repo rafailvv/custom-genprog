@@ -1,0 +1,10 @@
+\subsubsection{Benchmark 9 - Shipping Tier Switch} The provided Class is \texttt{ShippingTierCalculator} class with \texttt{ShippingTierCalculatorTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{normalizeTier(String tier)} - normalizes tier strings to canonical upper-case values and returns a default for null/empty.
+    \item \texttt{deliveryDays(String tier)} - returns delivery days for known tiers.
+    \item \texttt{baseFeeCents(String tier)} - returns the base fee (in cents) per tier.
+    \item \texttt{estimateShippingCents(int grams, String tier, boolean weekendDelivery)} - estimates the shipping fee including per-500g blocks and an extra fee for weekend delivery.\\
+\end{itemize}
+\textbf{Bugfix}\\
+In \texttt{estimateShippingCents} the weekend surcharge is applied when \texttt{weekendDelivery == false}. The condition is inverted; the extra fee should be added when \texttt{weekendDelivery} is true. Fix by changing the condition to \texttt{if (weekendDelivery) price += 250;}.

@@ -1,0 +1,9 @@
+\subsubsection{Benchmark 11 - Consecutive Batcher} The provided Class is \texttt{ConsecutiveBatcher} class with \texttt{ConsecutiveBatcherTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{groupConsecutive(List<Integer> sortedIds)} - groups consecutive integer IDs into sublists.
+    \item \texttt{largestGroupSize(List<List<Integer>> groups)} - returns the size of the largest group.
+    \item \texttt{flatten(List<List<Integer>> groups)} - flattens grouped IDs back into a single list.\\
+\end{itemize}
+\textbf{Bugfix}\\
+In \texttt{groupConsecutive} the code reuses and clears the same \texttt{current} list when starting a new group. Because the cleared list reference has already been added to \texttt{groups}, previously added groups become empty. Fix by adding a copy of \texttt{current} to \texttt{groups} (e.g. \texttt{groups.add(new ArrayList<>(current));}) and creating a fresh \texttt{current = new ArrayList<>();} for the next group.

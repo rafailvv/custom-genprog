@@ -1,0 +1,9 @@
+{
+  "name": "B12_TagSanitizer",
+  "buggySourcePath": "buggy/TagSanitizer.java",
+  "fixedSourcePath": "fixed/TagSanitizer.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "TagSanitizer",
+  "testClassNames": ["TagSanitizerTest"]
+}

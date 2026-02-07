@@ -1,0 +1,9 @@
+{
+  "name": "B10_BillingProration",
+  "buggySourcePath": "buggy/BillingProration.java",
+  "fixedSourcePath": "fixed/BillingProration.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "BillingProration",
+  "testClassNames": ["BillingProrationTest"]
+}

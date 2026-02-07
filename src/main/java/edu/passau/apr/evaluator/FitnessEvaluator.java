@@ -1,8 +1,12 @@
 package edu.passau.apr.evaluator;
 
 import edu.passau.apr.model.FitnessResult;
-import edu.passau.apr.model.Patch;
-import org.junit.platform.engine.TestExecutionResult;
+import org.junit.platform.engine.discovery.DiscoverySelectors;
+import org.junit.platform.launcher.Launcher;
+import org.junit.platform.launcher.LauncherDiscoveryRequest;
+import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
+import org.junit.platform.launcher.core.LauncherFactory;
+import org.junit.platform.launcher.listeners.SummaryGeneratingListener;
 
 import javax.tools.JavaCompiler;
 import javax.tools.StandardJavaFileManager;
@@ -10,13 +14,21 @@ import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.PrintStream;
+import java.io.StringWriter;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.*;
 
 /**
@@ -26,7 +38,13 @@ import java.util.concurrent.*;
 public class FitnessEvaluator {
 
     private record CompilationResult(boolean success, String classPath) {}
-    private record TestExecutionResult(int passingCount, int failingCount, int totalCount) {}
+    private record TestExecutionResult(int passingCount, int failingCount, int totalCount,
+                                       Set<String> passedTests, Set<String> discoveredTests) {}
+    // End-to-end evaluation should be long enough for compile + full suite execution.
+    private static final int EVALUATION_TIMEOUT_SEC = 30;
+    private static final int COMPILATION_TIMEOUT_SEC = 5;
+    private static final int TEST_TIMEOUT_SEC = 2;
+    private static final Object STD_IO_LOCK = new Object();
 
     private final String buggySourcePath;
     private final String fixedSourcePath;
@@ -37,6 +55,9 @@ public class FitnessEvaluator {
     private final Path tempDir;
     private final String mainClassName;
     private final Path testClassesDir; // Pre-compiled test classes
+    private Set<String> positiveTestIds = Set.of();
+    private Set<String> negativeTestIds = Set.of();
+    private Set<String> allTestIds = Set.of();
 
     public FitnessEvaluator(String buggySourcePath, String fixedSourcePath, String testSourcePath, 
                            List<String> testClassNames,
@@ -54,6 +75,7 @@ public class FitnessEvaluator {
         Files.createDirectories(testClassesDir);
         
         precompileTests();
+        initializeFitnessPartitions();
     }
     
     private void precompileTests() {
@@ -88,12 +110,15 @@ public class FitnessEvaluator {
                     options.add("-cp");
                     options.add(systemClasspath);
                 }
-                
+
+                // Candidate compilation failures are expected during search; keep evaluator output quiet.
+                PrintWriter silentOutput = new PrintWriter(new StringWriter());
                 JavaCompiler.CompilationTask task = compiler.getTask(
-                    null, fileManager, null, options, null,
+                    silentOutput, fileManager, null, options, null,
                     fileManager.getJavaFileObjectsFromFiles(allFiles)
                 );
                 task.call();
+                silentOutput.close();
             }
             
             fileManager.close();
@@ -101,28 +126,52 @@ public class FitnessEvaluator {
         }
     }
 
+    private void initializeFitnessPartitions() {
+        try {
+            CompilationResult baselineCompile = compile(new File(buggySourcePath), testSourcePath);
+            if (!baselineCompile.success) {
+                return;
+            }
+
+            TestExecutionResult baseline = runTestsSilenced(baselineCompile.classPath);
+            if (baseline.discoveredTests.isEmpty()) {
+                return;
+            }
+
+            Set<String> discovered = new HashSet<>(baseline.discoveredTests);
+            Set<String> positives = new HashSet<>(baseline.passedTests);
+            Set<String> negatives = new HashSet<>(discovered);
+            negatives.removeAll(positives);
+
+            this.allTestIds = Set.copyOf(discovered);
+            this.positiveTestIds = Set.copyOf(positives);
+            this.negativeTestIds = Set.copyOf(negatives);
+        } catch (Exception ignored) {
+        }
+    }
+
     /**
      * Applies a patch to the source code and evaluates its fitness.
      */
-    public FitnessResult evaluate(Patch patch, List<String> originalSourceLines) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+    public FitnessResult evaluate(String patchedSource) {
+        ExecutorService executor = newDaemonSingleThreadExecutor("apr-eval");
         Future<FitnessResult> future = executor.submit(() -> {
             try {
-                List<String> modifiedLines = patch.applyTo(originalSourceLines);
-                
                 String fileName = mainClassName + ".java";
                 Path modifiedSourceFile = tempDir.resolve(fileName);
-                Files.write(modifiedSourceFile, modifiedLines);
 
+                Files.writeString(modifiedSourceFile, patchedSource);
                 CompilationResult compileResult = compile(modifiedSourceFile.toFile(), testSourcePath);
-                
+
                 if (!compileResult.success) {
-                    return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+                    return new FitnessResult(0, 0, 0, 0.0, false, false);
                 }
 
-                TestExecutionResult testResult = runTests(compileResult.classPath);
-                
-                double fitness = calculateFitness(testResult.passingCount, testResult.failingCount);
+                TestExecutionResult testResult = runTestsSilenced(compileResult.classPath);
+
+                int positivePassed = countIntersection(testResult.passedTests, positiveTestIds);
+                int negativePassed = countIntersection(testResult.passedTests, negativeTestIds);
+                double fitness = calculateFitness(positivePassed, negativePassed);
                 boolean allPass = testResult.failingCount == 0 && testResult.totalCount > 0 && testResult.passingCount > 0;
 
                 return new FitnessResult(
@@ -135,17 +184,17 @@ public class FitnessEvaluator {
                 );
 
             } catch (Exception e) {
-                return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+                return new FitnessResult(0, 0, 0, 0.0, false, false);
             }
         });
-        
+
         try {
-            return future.get(10, TimeUnit.SECONDS);
+            return future.get(EVALUATION_TIMEOUT_SEC, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+            return new FitnessResult(0, 0, 0, 0.0, false, false);
         } catch (Exception e) {
-            return new FitnessResult(0, 0, 0, Double.NEGATIVE_INFINITY, false, false);
+            return new FitnessResult(0, 0, 0, 0.0, false, false);
         } finally {
             executor.shutdownNow();
         }
@@ -167,21 +216,24 @@ public class FitnessEvaluator {
             List<File> sourceFiles = new ArrayList<>();
             sourceFiles.add(sourceFile);
             
+            // Suppress javac diagnostics for transient mutants to avoid log flooding.
+            PrintWriter silentOutput = new PrintWriter(new StringWriter());
             JavaCompiler.CompilationTask sourceTask = compiler.getTask(
-                null, fileManager, null, null, null,
+                silentOutput, fileManager, null, null, null,
                 fileManager.getJavaFileObjectsFromFiles(sourceFiles)
             );
 
-            ExecutorService executor = Executors.newSingleThreadExecutor();
+            ExecutorService executor = newDaemonSingleThreadExecutor("apr-compile");
             Future<Boolean> future = executor.submit(sourceTask);
             
             boolean sourceSuccess = false;
             try {
-                sourceSuccess = future.get(3, TimeUnit.SECONDS);
+                sourceSuccess = future.get(COMPILATION_TIMEOUT_SEC, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 future.cancel(true);
             } catch (Exception ignored) {
             } finally {
+                silentOutput.close();
                 executor.shutdownNow();
             }
             
@@ -203,7 +255,24 @@ public class FitnessEvaluator {
         try {
             return runTestsWithJUnitLauncher(classPath);
         } catch (Exception e) {
-            return new TestExecutionResult(0, 0, 0);
+            return new TestExecutionResult(0, 0, 0, Set.of(), Set.of());
+        }
+    }
+
+    private TestExecutionResult runTestsSilenced(String classPath) {
+        synchronized (STD_IO_LOCK) {
+            PrintStream originalOut = System.out;
+            PrintStream originalErr = System.err;
+            PrintStream silent = new PrintStream(OutputStream.nullOutputStream());
+            try {
+                System.setOut(silent);
+                System.setErr(silent);
+                return runTests(classPath);
+            } finally {
+                System.setOut(originalOut);
+                System.setErr(originalErr);
+                silent.close();
+            }
         }
     }
 
@@ -222,7 +291,7 @@ public class FitnessEvaluator {
             String systemClasspath = System.getProperty("java.class.path");
             List<URL> urls = new ArrayList<>();
             
-            String[] classPathEntries = classPath.split(":");
+            String[] classPathEntries = classPath.split(java.util.regex.Pattern.quote(File.pathSeparator));
             for (String entry : classPathEntries) {
                 if (!entry.isEmpty()) {
                     try {
@@ -250,10 +319,12 @@ public class FitnessEvaluator {
             }
             
             if (urls.isEmpty()) {
-                return new TestExecutionResult(0, 0, 0);
+                return new TestExecutionResult(0, 0, 0, Set.of(), Set.of());
             }
             
             classLoader = new URLClassLoader(urls.toArray(new URL[0]), null);
+            Set<String> passedTests = new HashSet<>();
+            Set<String> discoveredTests = new HashSet<>();
 
             for (String testClassName : testClassNames) {
                 try {
@@ -261,6 +332,7 @@ public class FitnessEvaluator {
                     
                     // Find and run test methods
                     java.lang.reflect.Method[] methods = testClass.getDeclaredMethods();
+                    Arrays.sort(methods, Comparator.comparing(java.lang.reflect.Method::getName));
                     for (java.lang.reflect.Method method : methods) {
                         // Check for @Test annotation by name (to avoid import issues)
                         boolean hasTestAnnotation = false;
@@ -275,11 +347,17 @@ public class FitnessEvaluator {
                         }
                         
                         if (hasTestAnnotation) {
+                            String testId = testClassName + "#" + method.getName();
+                            discoveredTests.add(testId);
                             totalCount++;
                             try {
-                                Object testInstance = testClass.getDeclaredConstructor().newInstance();
+                                java.lang.reflect.Constructor<?> constructor = testClass.getDeclaredConstructor();
+                                constructor.setAccessible(true);
+                                Object testInstance = constructor.newInstance();
+
+                                method.setAccessible(true);
                                 
-                                ExecutorService executor = Executors.newSingleThreadExecutor();
+                                ExecutorService executor = newDaemonSingleThreadExecutor("apr-test");
                                 Future<?> future = executor.submit(() -> {
                                     try {
                                         method.invoke(testInstance);
@@ -289,8 +367,9 @@ public class FitnessEvaluator {
                                 });
                                 
                                 try {
-                                    future.get(5, TimeUnit.SECONDS);
+                                    future.get(TEST_TIMEOUT_SEC, TimeUnit.SECONDS);
                                     passingCount++;
+                                    passedTests.add(testId);
                                 } catch (TimeoutException e) {
                                     future.cancel(true);
                                     failingCount++;
@@ -308,7 +387,19 @@ public class FitnessEvaluator {
                 }
             }
 
+            if (allTestIds.isEmpty() && !discoveredTests.isEmpty()) {
+                allTestIds = Set.copyOf(discoveredTests);
+            }
+
+            return new TestExecutionResult(
+                passingCount,
+                failingCount,
+                totalCount,
+                Set.copyOf(passedTests),
+                Set.copyOf(discoveredTests)
+            );
         } catch (Exception e) {
+            return new TestExecutionResult(0, 0, 0, Set.of(), Set.of());
         } finally {
             if (classLoader != null) {
                 try {
@@ -317,12 +408,39 @@ public class FitnessEvaluator {
                 }
             }
         }
-
-        return new TestExecutionResult(passingCount, failingCount, totalCount);
     }
 
-    private double calculateFitness(int passingTests, int failingTests) {
-        return positiveTestWeight * passingTests - negativeTestWeight * failingTests;
+    private double calculateFitness(int positivePassedTests, int negativePassedTests) {
+        return positiveTestWeight * positivePassedTests + negativeTestWeight * negativePassedTests;
+    }
+
+    private int countIntersection(Set<String> passedTests, Set<String> referenceSet) {
+        if (passedTests.isEmpty()) {
+            return 0;
+        }
+        if (referenceSet.isEmpty()) {
+            if (allTestIds.isEmpty()) {
+                return passedTests.size();
+            }
+            return 0;
+        }
+
+        int count = 0;
+        for (String testId : passedTests) {
+            if (referenceSet.contains(testId)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private ExecutorService newDaemonSingleThreadExecutor(String namePrefix) {
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(runnable, namePrefix + "-" + System.nanoTime());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return Executors.newSingleThreadExecutor(threadFactory);
     }
 
 
@@ -340,4 +458,3 @@ public class FitnessEvaluator {
         }
     }
 }
-

@@ -1,0 +1,9 @@
+{
+  "name": "B08_LogReportBuilder",
+  "buggySourcePath": "buggy/LogReportBuilder.java",
+  "fixedSourcePath": "fixed/LogReportBuilder.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "LogReportBuilder",
+  "testClassNames": ["LogReportBuilderTest"]
+}

@@ -1,0 +1,10 @@
+\subsubsection{Benchmark 8 - Log Report Builder} The provided Class is \texttt{LogReportBuilder} class with \texttt{LogReportBuilderTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{parseLines(List<String> lines)} - parses raw log lines into structured rows.
+    \item \texttt{aggregate(List<String> lines)} - aggregates per-endpoint statistics (success/fail counts and total latency).
+    \item \texttt{topFailingEndpoints(List<String> lines, int limit)} - ranks endpoints by failures and average latency.
+    \item \texttt{buildSummaryLine(List<String> lines, String path)} - builds a summary line for a given path.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The comparator used in \texttt{topFailingEndpoints} mis-handles tie-breaking: when average latency compares equal it returns the latency comparison result (zero) instead of falling back to key comparison. Adjust the comparator to compare keys when the previous comparisons are equal (i.e. when \texttt{latencyCmp == 0} return \texttt{a.getKey().compareTo(b.getKey())}). This yields a stable, deterministic ordering.

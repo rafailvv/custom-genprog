@@ -10,7 +10,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Utility class for loading benchmark configuration and fault localization data.
@@ -36,16 +40,48 @@ public class BenchmarkLoader {
             config.setFixedSourcePath(basePath.resolve(config.getFixedSourcePath()).toString());
             config.setTestSourcePath(basePath.resolve(config.getTestSourcePath()).toString());
             config.setFaultLocalizationPath(basePath.resolve(config.getFaultLocalizationPath()).toString());
+
+            List<String> discoveredTests = discoverTestClassNames(config.getTestSourcePath());
+            if (!discoveredTests.isEmpty()) {
+                config.setTestClassNames(discoveredTests);
+            }
             
             return config;
         }
+    }
+
+    private static List<String> discoverTestClassNames(String testSourcePath) throws IOException {
+        Path testPath = Paths.get(testSourcePath);
+        if (!Files.exists(testPath)) {
+            return List.of();
+        }
+
+        if (Files.isRegularFile(testPath)) {
+            return List.of(classNameFromFile(testPath));
+        }
+
+        List<String> classNames = new ArrayList<>();
+        try (Stream<Path> paths = Files.walk(testPath)) {
+            paths.filter(Files::isRegularFile)
+                .filter(path -> path.getFileName().toString().endsWith("Test.java"))
+                .map(BenchmarkLoader::classNameFromFile)
+                .sorted()
+                .forEach(classNames::add);
+        }
+        return classNames;
+    }
+
+    private static String classNameFromFile(Path filePath) {
+        String fileName = filePath.getFileName().toString();
+        int extensionIndex = fileName.lastIndexOf(".java");
+        return extensionIndex > 0 ? fileName.substring(0, extensionIndex) : fileName;
     }
 
     /**
      * Loads fault localization weights from JSON file.
      * Expected format: [{"lineNumber": 5, "weight": 1.0}, ...]
      */
-    public static List<StatementWeight> loadFaultLocalization(String filePath) throws IOException {
+    public static Map<Integer, Double> loadFaultLocalization(String filePath) throws IOException {
         Path path = Paths.get(filePath);
         if (!Files.exists(path)) {
             throw new IOException("Fault localization file not found: " + filePath);
@@ -53,28 +89,9 @@ public class BenchmarkLoader {
 
         try (FileReader reader = new FileReader(path.toFile())) {
             StatementWeight[] weights = gson.fromJson(reader, StatementWeight[].class);
-            List<StatementWeight> result = new ArrayList<>();
-            for (StatementWeight weight : weights) {
-                result.add(weight);
-            }
-            return result;
+            Map<Integer, Double> weightMap = new HashMap<>();
+            Arrays.asList(weights).forEach(sw -> weightMap.put(sw.getLineNumber(), sw.getWeight()));
+            return weightMap;
         }
     }
-
-    /**
-     * Reads source code file into a list of lines.
-     */
-    public static List<String> readSourceFile(String filePath) throws IOException {
-        Path path = Paths.get(filePath);
-        return Files.readAllLines(path);
-    }
-
-    /**
-     * Writes source code lines to a file.
-     */
-    public static void writeSourceFile(String filePath, List<String> lines) throws IOException {
-        Path path = Paths.get(filePath);
-        Files.write(path, lines);
-    }
 }
-

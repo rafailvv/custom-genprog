@@ -1,0 +1,9 @@
+{
+  "name": "B06_InventoryNormalization",
+  "buggySourcePath": "buggy/InventoryNormalizer.java",
+  "fixedSourcePath": "fixed/InventoryNormalizer.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "InventoryNormalizer",
+  "testClassNames": ["InventoryNormalizerTest"]
+}

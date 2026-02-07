@@ -5,10 +5,8 @@ import edu.passau.apr.config.Config;
 import edu.passau.apr.evaluator.FitnessEvaluator;
 import edu.passau.apr.model.BenchmarkConfig;
 import edu.passau.apr.model.Patch;
-import edu.passau.apr.model.StatementWeight;
 import edu.passau.apr.operator.PatchGenerator;
 import edu.passau.apr.util.BenchmarkLoader;
-import edu.passau.apr.util.WeightedPathSelector;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,7 +14,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Random;
 
 /**
@@ -44,14 +41,16 @@ public class Main {
             System.out.println("Time Limit: " + config.getTimeLimitSec() + " seconds");
             System.out.println();
 
-            BenchmarkConfig benchmarkConfig = BenchmarkLoader.loadConfig(config.getBenchmarkPath());
-            List<String> sourceLines = BenchmarkLoader.readSourceFile(benchmarkConfig.getBuggySourcePath());
-            List<StatementWeight> weights = BenchmarkLoader.loadFaultLocalization(
-                benchmarkConfig.getFaultLocalizationPath());
+            var random = new Random(config.getSeed());
 
-            Random random = new Random(config.getSeed());
-            WeightedPathSelector pathSelector = new WeightedPathSelector(weights, random);
-            FitnessEvaluator fitnessEvaluator = new FitnessEvaluator(
+            var benchmarkConfig = BenchmarkLoader.loadConfig(config.getBenchmarkPath());
+            var weights = BenchmarkLoader.loadFaultLocalization(benchmarkConfig.getFaultLocalizationPath());
+
+            var buggySourcePath = Paths.get(benchmarkConfig.getBuggySourcePath());
+            var buggySource = Files.readString(buggySourcePath);
+            var patchGenerator = new PatchGenerator(buggySource, weights, config.getMutationWeight(), random);
+
+            var fitnessEvaluator = new FitnessEvaluator(
                 benchmarkConfig.getBuggySourcePath(),
                 benchmarkConfig.getFixedSourcePath(),
                 benchmarkConfig.getTestSourcePath(),
@@ -61,12 +60,7 @@ public class Main {
                 benchmarkConfig.getMainClassName()
             );
 
-            PatchGenerator patchGenerator = new PatchGenerator(
-                random, pathSelector, sourceLines,
-                config.getMutationWeight()
-            );
-
-            GeneticAlgorithm ga = new GeneticAlgorithm(
+            var ga = new GeneticAlgorithm(
                 config.getPopulationSize(),
                 config.getMaxGenerations(),
                 config.getTimeLimitSec() * 1_000L,
@@ -74,8 +68,7 @@ public class Main {
                 CROSS_OVER_RATE,
                 random,
                 patchGenerator,
-                fitnessEvaluator,
-                sourceLines
+                fitnessEvaluator
             );
 
             System.out.println("Starting genetic algorithm...");
@@ -91,7 +84,7 @@ public class Main {
                 System.out.println("Patch:");
                 System.out.println(result.bestPatch().toString());
                 
-                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.bestPatch());
+                savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, result.bestPatch());
             } else {
                 System.out.println("No solution found within limits.");
                 if (result.bestFitness() != null) {
@@ -99,7 +92,7 @@ public class Main {
                     System.out.println("Best Patch:");
                     System.out.println(result.bestPatch().toString());
 
-                    savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, sourceLines, result.bestPatch());
+                    savePatchedFile(config.getBenchmarkPath(), benchmarkConfig, result.bestPatch());
                 }
             }
 
@@ -188,18 +181,17 @@ public class Main {
         System.out.println(usage);
     }
 
-    private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig,
-                                       List<String> originalLines, Patch patch) {
+    private static void savePatchedFile(String benchmarkPath, BenchmarkConfig benchmarkConfig, Patch patch) {
         try {
-            List<String> patchedLines = patch.applyTo(originalLines);
+            String patchedSource = patch.getCompilationUnit().toString();
 
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-            Path outputDir = Paths.get("out", Paths.get(benchmarkPath).getFileName().toString(), 
+            Path outputDir = Paths.get("out", Paths.get(benchmarkPath).getFileName().toString(),
                                        "patch_" + timestamp);
             Files.createDirectories(outputDir);
 
             Path patchedFile = outputDir.resolve(benchmarkConfig.getMainClassName() + ".java");
-            Files.write(patchedFile, patchedLines);
+            Files.writeString(patchedFile, patchedSource);
 
             System.out.println("Patched file saved to: " + patchedFile);
 
@@ -208,4 +200,3 @@ public class Main {
         }
     }
 }
-

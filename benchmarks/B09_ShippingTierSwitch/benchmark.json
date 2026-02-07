@@ -1,0 +1,9 @@
+{
+  "name": "B09_ShippingTierSwitch",
+  "buggySourcePath": "buggy/ShippingTierCalculator.java",
+  "fixedSourcePath": "fixed/ShippingTierCalculator.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "ShippingTierCalculator",
+  "testClassNames": ["ShippingTierCalculatorTest"]
+}

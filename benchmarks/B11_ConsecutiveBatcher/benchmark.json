@@ -1,0 +1,9 @@
+{
+  "name": "B11_ConsecutiveBatcher",
+  "buggySourcePath": "buggy/ConsecutiveBatcher.java",
+  "fixedSourcePath": "fixed/ConsecutiveBatcher.java",
+  "testSourcePath": "tests",
+  "faultLocalizationPath": "fault-localization.json",
+  "mainClassName": "ConsecutiveBatcher",
+  "testClassNames": ["ConsecutiveBatcherTest"]
+}

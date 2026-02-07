@@ -1,0 +1,10 @@
+public class ArrayIndexUtil {
+
+    public static int getFirstElement(int[] array) {
+        return array[array.length - 1];
+    }
+
+    public static int getLastElement(int[] array) {
+        return array[0];
+    }
+}

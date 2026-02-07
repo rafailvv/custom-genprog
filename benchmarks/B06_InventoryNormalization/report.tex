@@ -1,0 +1,10 @@
+\subsubsection{Benchmark 6 - Inventory Normalization} The provided Class is \texttt{InventoryNormalizer} class with \texttt{InventoryNormalizerTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{normalizeSku(String rawSku)} - trims, upper-cases and removes non-alphanumeric characters from SKU strings.
+    \item \texttt{applyEvents(List<StockEvent> events)} - applies inbound/outbound stock events to produce a SKU->stock map.
+    \item \texttt{estimateDailyDemand(List<String> soldSkus)} - counts daily demand per SKU.
+    \item \texttt{buildReorderList(...)} - builds a sorted list of SKUs that need reordering based on projected need.\\
+\end{itemize}
+\textbf{Bugfix}\\
+In \texttt{applyEvents} the signed delta is computed incorrectly: both branches use \texttt{event.delta} which ignores outbound (negative) events. The correct behavior is to subtract the delta for outbound events (e.g. \texttt{int signedDelta = event.inbound ? event.delta : -event.delta}). Fixing that preserves correct stock accounting.

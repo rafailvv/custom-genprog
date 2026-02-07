@@ -1,0 +1,10 @@
+\subsubsection{Benchmark 10 - Billing Proration} The provided Class is \texttt{BillingProration} class with \texttt{BillingProrationTest} as its test-class.\\
+\textbf{Methods}
+\begin{itemize}
+    \item \texttt{prorateCents(int monthlyCents, int activeDays, int daysInMonth)} - prorates a monthly amount according to active days.
+    \item \texttt{prorateWithFloor(...)} - applies a minimum floor to the prorated amount.
+    \item \texttt{annualToMonthlyCents(int annualCents)} - divides an annual amount by 12 for a monthly estimate.
+    \item \texttt{estimateUpgradeCharge(...)} - estimates prorated upgrade charge from annual cents and remaining days.\\
+\end{itemize}
+\textbf{Bugfix}\\
+The \texttt{prorateCents} method computes a bounded active-days value but then overwrites it with \texttt{daysInMonth}, ignoring the actual \texttt{activeDays}. Remove the erroneous assignment (\texttt{boundedActiveDays = daysInMonth;}) so the prorate calculation uses the intended bounded active days.
